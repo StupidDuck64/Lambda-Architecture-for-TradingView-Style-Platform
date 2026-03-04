@@ -10,59 +10,6 @@ Hệ thống streaming giá crypto real-time từ Binance, xử lý bằng Apach
 
 ![alt text](image.png)
 
-```
-  Binance WebSocket
-        │
-        ▼
-  ┌─────────────┐
-  │  Producer   │  (Python)  ─────────────────────────────────────────────┐
-  │ (Binance WS)│                                                          │
-  └─────────────┘                                                          │
-        │ crypto_ticker / crypto_trades                                    │
-        ▼                                                                  │
-  ┌─────────────┐                                                          │
-  │    Kafka    │  (KRaft, 3.9)                                            │
-  │  broker+ctrl│                                                          │
-  └──────┬──────┘                                                          │
-         │                                                                 │
-    ┌────┴─────────────────────────┐                                       │
-    │                             │                                        │
-    ▼                             ▼                                        │
-┌────────────┐            ┌──────────────┐                                 │
-│   Flink    │            │    Spark     │                                 │
-│ 1.18.1     │            │   3.4.1      │                                 │
-│ JobManager │            │ Master+Worker│                                 │
-│ TaskManager│            └──────┬───────┘                                │
-└─────┬──────┘                   │                                        │
-      │                          │ append to Iceberg                      │
-      │                          ▼                                        │
-      │                  ┌──────────────┐                                 │
-      │                  │   MinIO      │  ◄── Object Storage (S3-compat) │
-      │                  │  + Iceberg   │                                 │
-      │                  │  (JDBC→PG)   │                                 │
-      │                  └──────┬───────┘                                 │
-      │                         │                                         │
-      │             ┌───────────┘                                         │
-      │             ▼                                                      │
-      │        ┌─────────┐                                                │
-      │        │  Trino  │  442  (query Iceberg)                          │
-      │        └─────────┘                                                │
-      │                                                                   │
-      ├──► KeyDB  (latest ticker cache → FastAPI)                         │
-      └──► InfluxDB 2.7  (time-series metrics → dashboard)               │
-                                                                          │
-  ┌─────────────────────────────────────────────────────────┐            │
-  │  Dagster  (orchestration)                               │            │
-  │  - daily kline ingest (02:00 AM)                        │            │
-  │  - weekly Iceberg maintenance (Sun 03:00 AM)            │            │
-  └─────────────────────────────────────────────────────────┘            │
-                                                                          │
-  ┌──────────────────────────────────────────────────────────────────────┘
-  │  PostgreSQL 16  (Iceberg JDBC catalog + Dagster metadata)
-  └──────────────────────────────────────────────────────────
-```
-
----
 
 ## Hướng dẫn chạy
 
