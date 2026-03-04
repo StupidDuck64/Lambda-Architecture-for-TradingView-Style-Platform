@@ -10,7 +10,7 @@ Hệ thống streaming giá crypto real-time từ Binance, xử lý bằng Apach
 
 ![alt text](image.png)
 
-```text
+```
   Binance WebSocket
         │
         ▼
@@ -68,8 +68,8 @@ Hệ thống streaming giá crypto real-time từ Binance, xử lý bằng Apach
 
 ### Yêu cầu
 
-- **Docker Desktop** >= 4.x (WSL2 backend tren Windows)
-- **RAM toi thieu**: 16 GB (khuyen nghi 20 GB+)
+- **Docker Desktop** >= 4.x (WSL2 backend trên Windows)
+- **RAM tối thiểu**: 16 GB (khuyến nghị 20 GB+)
 - **Disk**: 20 GB free
 - **CPU**: 6 cores+
 
@@ -80,7 +80,7 @@ git clone https://github.com/StupidDuck64/TradingView-Style-Crypto-Platform.git
 cd TradingView-Style-Crypto-Platform
 ```
 
-### 2. Kiem tra file `.env`
+### 2. Kiểm tra file `.env`
 
 ```env
 INFLUX_TOKEN=rOR4d3WHhRWiXF4MSvjM0Kg3yiB_omldxVarArm4R2hMIfu6e5JFx9E2ktgk_Qomj4giZLKbjC-stDelB9FvZw==
@@ -91,28 +91,28 @@ POSTGRES_PASSWORD=iceberg123
 POSTGRES_DB=iceberg_catalog
 ```
 
-> **Quan trong**: File `.env` da co trong repo nhung **khong duoc commit lai sau khi thay token that**. Them `.env` vao `.gitignore` neu dung token production.
+> **Quan trọng**: File `.env` đã có trong repo nhưng **không được commit lại sau khi thay token thật**. Thêm `.env` vào `.gitignore` nếu dùng token production.
 
-### 3. Build va start toan bo stack
+### 3. Build và start toàn bộ stack
 
 ```bash
-# Lan dau — build image custom (Flink, Dagster, Producer)
+# Lần đầu — build image custom (Flink, Dagster, Producer)
 docker compose up -d --build
 
-# Tu lan sau
+# Từ lần sau
 docker compose up -d
 ```
 
-### 4. Kiem tra health
+### 4. Kiểm tra health
 
 ```bash
 docker compose ps
-# Tat ca services phai o trang thai "healthy" hoac "running"
+# Tất cả services phải ở trạng thái "healthy" hoặc "running"
 ```
 
 ### 5. Submit Flink job (real-time ingest)
 
-Flink la **long-running streaming job** — khong qua Dagster, phai submit thu cong sau khi `flink-jobmanager` bao healthy:
+Flink là **long-running streaming job** — không qua Dagster, phải submit thủ công sau khi `flink-jobmanager` báo healthy:
 
 ```bash
 docker exec flink-jobmanager \
@@ -121,11 +121,11 @@ docker exec flink-jobmanager \
   --jobmanager flink-jobmanager:8081
 ```
 
-Kiem tra job dang chay tai http://localhost:8081.
+Kiểm tra job đang chạy tại http://localhost:8081.
 
 ### 6. Start Spark Streaming (batch to Iceberg)
 
-Tuong tu, `ingest_crypto.py` la **long-running streaming job** — submit thu cong:
+Tương tự, `ingest_crypto.py` là **long-running streaming job** — submit thủ công:
 
 ```bash
 docker exec spark-master \
@@ -135,23 +135,23 @@ docker exec spark-master \
   /app/src/ingest_crypto.py
 ```
 
-### Dagster quan ly cai gi?
+### Dagster quản lý cái gì?
 
-Dagster chi orchestrate **batch jobs co schedule** — khong quan ly cac streaming job (vi streaming job chay lien tuc, khong co start/end ro rang):
+Dagster chỉ orchestrate **batch jobs có schedule** — không quản lý các streaming job (vì streaming job chạy liên tục, không có start/end rõ ràng):
 
-| Job | Chay bang gi | Cach start |
+| Job | Chạy bằng gì | Cách start |
 |---|---|---|
-| `producer_binance.py` | Docker container (producer) | Tu dong khi `docker compose up` |
-| `ingest_flink_crypto.py` | Flink cluster | Submit thu cong (buoc 5) |
-| `ingest_crypto.py` | Spark cluster | Submit thu cong (buoc 6) |
-| `ingest_historical_iceberg.py` | **Dagster** (02:00 AM) | Tu dong theo schedule, hoac manual trigger tren Dagster UI |
-| `iceberg_maintenance.py` | **Dagster** (CN 03:00 AM) | Tu dong theo schedule, hoac manual trigger tren Dagster UI |
+| `producer_binance.py` | Docker container (producer) | Tự động khi `docker compose up` |
+| `ingest_flink_crypto.py` | Flink cluster | Submit thủ công (bước 5) |
+| `ingest_crypto.py` | Spark cluster | Submit thủ công (bước 6) |
+| `ingest_historical_iceberg.py` | **Dagster** (02:00 AM) | Tự động theo schedule, hoặc manual trigger trên Dagster UI |
+| `iceberg_maintenance.py` | **Dagster** (CN 03:00 AM) | Tự động theo schedule, hoặc manual trigger trên Dagster UI |
 
-Vao http://localhost:3000 de xem status, trigger thu cong, hoac bat/tat schedule.
+Vào http://localhost:3000 để xem status, trigger thủ công, hoặc bật/tắt schedule.
 
-### Thu tu khoi dong container (docker compose up -d)
+### Thứ tự khởi động container (docker compose up -d)
 
-Day la thu tu Docker dam bao infrastructure san sang — tat ca chay bang 1 lenh, khong can bat tung cai:
+Đây là thứ tự Docker đảm bảo infrastructure sẵn sàng — tất cả chạy bằng 1 lệnh, không cần bật từng cái:
 
 ```
 postgres ──────────────────────────────────────────────┐
@@ -171,7 +171,7 @@ keydb ────────────────────────�
                                                trino ─┘
                                          dagster-webserver
                                            └── dagster-daemon
-producer (cho kafka healthy)
+producer (chờ kafka healthy)
 ```
 
 ### Port Map
@@ -190,26 +190,26 @@ producer (cho kafka healthy)
 | Trino UI | `8083` | http://localhost:8083 |
 | Dagster UI | `3000` | http://localhost:3000 |
 
-### Lenh huu ich
+### Lệnh hữu ích
 
 ```bash
-# Xem log mot service
+# Xem log một service
 docker compose logs -f kafka
 docker compose logs -f flink-jobmanager
 
-# Restart mot service
+# Restart một service
 docker compose restart flink-taskmanager
 
-# Dung toan bo (giu data volumes)
+# Dừng toàn bộ (giữ data volumes)
 docker compose stop
 
-# Dung va xoa hoan toan (ke ca volumes — mat data)
+# Dừng và xoá hoàn toàn (kể cả volumes — mất data)
 docker compose down -v
 
-# Scale them Spark worker
+# Scale thêm Spark worker
 docker compose up -d --scale spark-worker=3
 
-# Vao shell container
+# Vào shell container
 docker exec -it kafka bash
 docker exec -it flink-jobmanager bash
 docker exec -it trino trino
@@ -217,9 +217,9 @@ docker exec -it trino trino
 
 ---
 
-## Qua trinh thu thap va xu ly du lieu
+## Quá trình thu thập và xử lý dữ liệu
 
-### 1. Thu thap — `producer_binance.py`
+### 1. Thu thập — `producer_binance.py`
 
 ```
 Binance WebSocket API
@@ -233,11 +233,11 @@ Binance WebSocket API
         └── topic: crypto_trades   ← JSON trade: symbol, price, qty, side, tradeId
 ```
 
-Producer duy tri mot WebSocket connection lien tuc voi Binance. Moi su kien ticker/trade duoc serialize thanh JSON va publish vao Kafka voi `key = symbol` (vi du `BTCUSDT`).
+Producer duy trì một WebSocket connection liên tục với Binance. Mỗi sự kiện ticker/trade được serialize thành JSON và publish vào Kafka với `key = symbol` (ví dụ `BTCUSDT`).
 
 ---
 
-### 2. Xu ly real-time — `ingest_flink_crypto.py`
+### 2. Xử lý real-time — `ingest_flink_crypto.py`
 
 ```
 Kafka topic: crypto_ticker
@@ -247,30 +247,30 @@ Kafka topic: crypto_ticker
         │
         ├─── flatMap: KeyDBWriter
         │         └──► KeyDB  SET "ticker:BTCUSDT" → JSON latest price
-        │              Key TTL: khong set → giu mai, overwrite lien tuc
+        │              Key TTL: không set → giữ mãi, overwrite liên tục
         │
         └─── flatMap: InfluxDBWriter
                   └──► InfluxDB bucket: crypto
                        measurement: market_ticks
                        tags: symbol
                        fields: price (float), volume (float), quote_volume (float)
-                       timestamp: event time tu Binance
+                       timestamp: event time từ Binance
 ```
 
-**Checkpointing**: Flink ghi checkpoint vao `s3://flink-checkpoints/` (MinIO) moi 60s. Neu job crash, recovery tu dong tu checkpoint gan nhat — khong mat data.
+**Checkpointing**: Flink ghi checkpoint vào `s3://flink-checkpoints/` (MinIO) mỗi 60s. Nếu job crash, recovery tự động từ checkpoint gần nhất — không mất data.
 
-**NoopSink**: Terminal sink trong Flink job graph duoc gan vao `NoopSink` (khong in ra stdout) thay vi `.print()` de tranh I/O overhead.
+**NoopSink**: Terminal sink trong Flink job graph được gắn vào `NoopSink` (không in ra stdout) thay vì `.print()` để tránh I/O overhead.
 
 ---
 
-### 3. Xu ly batch / micro-batch — `ingest_crypto.py`
+### 3. Xử lý batch / micro-batch — `ingest_crypto.py`
 
 ```
 Kafka topics: crypto_ticker + crypto_trades
         │
         ▼
   Spark Structured Streaming
-  (readStream tu Kafka, trigger moi 1 phut)
+  (readStream từ Kafka, trigger mỗi 1 phút)
         │
         ├── parse JSON → DataFrame
         ├── cast types, add partition cols (date, hour)
@@ -284,21 +284,21 @@ Kafka topics: crypto_ticker + crypto_trades
                   format: Parquet, partitioned by (date, symbol)
 ```
 
-Moi micro-batch append Parquet files moi vao MinIO va cap nhat Iceberg metadata (snapshot moi) trong PostgreSQL.
+Mỗi micro-batch append Parquet files mới vào MinIO và cập nhật Iceberg metadata (snapshot mới) trong PostgreSQL.
 
 ---
 
-### 4. Ingest lich su — `ingest_historical_iceberg.py`
+### 4. Ingest lịch sử — `ingest_historical_iceberg.py`
 
 ```
 Binance REST API
   GET /api/v3/klines?symbol=BTCUSDT&interval=1h&limit=1000
         │
         ▼
-  Spark batch job (trigger thu cong hoac Dagster 02:00 AM)
+    Spark batch job (trigger thủ công hoặc Dagster 02:00 AM)
         │
-        ├── fetch tat ca symbol theo danh sach config
-        ├── convert sang DataFrame (open, high, low, close, volume, ...)
+      ├── fetch tất cả symbol theo danh sách config
+      ├── convert sang DataFrame (open, high, low, close, volume, ...)
         │
         └──► Iceberg table: cryptoprice.market_data.historical_hourly
                   storage: s3://cryptoprice/iceberg/historical_hourly/
@@ -308,19 +308,19 @@ Binance REST API
 
 ---
 
-### 5. Bao tri Iceberg — `iceberg_maintenance.py`
+### 5. Bảo trì Iceberg — `iceberg_maintenance.py`
 
 ```
-Spark batch job (Dagster, Chu nhat 03:00 AM)
+Spark batch job (Dagster, Chủ nhật 03:00 AM)
         │
-        ├── expire_snapshots()    → xoa snapshot cu hon 7 ngay
-        │       └──► cap nhat iceberg_tables trong PostgreSQL
+  ├── expire_snapshots()    → xoá snapshot cũ hơn 7 ngày
+  │       └──► cập nhật iceberg_tables trong PostgreSQL
         │
-        ├── remove_orphan_files() → quet MinIO, xoa Parquet khong co snapshot tham chieu
-        │       └──► goi S3 API truc tiep tren MinIO
+  ├── remove_orphan_files() → quét MinIO, xoá Parquet không có snapshot tham chiếu
+  │       └──► gọi S3 API trực tiếp trên MinIO
         │
-        └── rewrite_data_files()  → compact small files thanh file lon hon
-                └──► ghi file Parquet moi vao MinIO, cap nhat metadata pointer trong PostgreSQL
+  └── rewrite_data_files()  → compact small files thành file lớn hơn
+    └──► ghi file Parquet mới vào MinIO, cập nhật metadata pointer trong PostgreSQL
 ```
 
 ---
@@ -333,31 +333,31 @@ Client SQL
         ▼
   Trino coordinator (port 8083)
         │
-        ├── doc Iceberg catalog tu PostgreSQL:
-        │       DB iceberg_catalog → bang iceberg_tables
-        │       → lay metadata_location (path toi file .avro tren MinIO)
+        ├── đọc Iceberg catalog từ PostgreSQL:
+        │       DB iceberg_catalog → bảng iceberg_tables
+        │       → lấy metadata_location (path tới file .avro trên MinIO)
         │
-        ├── doc metadata files (.avro, .json) tu MinIO
+        ├── đọc metadata files (.avro, .json) từ MinIO
         │
-        └── doc data files (Parquet) tu MinIO, tra ket qua ve client
+        └── đọc data files (Parquet) từ MinIO, trả kết quả về client
 ```
 
-Trino **chi doc**, khong ghi vao InfluxDB hay KeyDB.
+Trino **chỉ đọc**, không ghi vào InfluxDB hay KeyDB.
 
 ---
 
 ### 7. Orchestration — Dagster
 
 ```
-Dagster daemon (scheduler loop moi 30s)
+Dagster daemon (scheduler loop mỗi 30s)
         │
-        ├── Schedule: daily_kline_ingest (02:00 AM hang ngay)
+  ├── Schedule: daily_kline_ingest (02:00 AM hằng ngày)
         │       └── spark-submit ingest_historical_iceberg.py
-        │               → ghi vao MinIO + PostgreSQL (Iceberg)
+  │               → ghi vào MinIO + PostgreSQL (Iceberg)
         │
-        ├── Schedule: weekly_iceberg_maintenance (Chu nhat 03:00 AM)
+  ├── Schedule: weekly_iceberg_maintenance (Chủ nhật 03:00 AM)
         │       └── spark-submit iceberg_maintenance.py
-        │               → compact + expire tren MinIO + PostgreSQL
+  │               → compact + expire trên MinIO + PostgreSQL
         │
         └── Dagster metadata → DB dagster (PostgreSQL)
                     tables: runs, event_logs, schedules, sensors, partitions, ...
@@ -475,7 +475,7 @@ cryptoprice/
         └── init.sql                     # Creates iceberg_catalog + dagster DBs with Iceberg schema
 ```
 
-### PostgreSQL phuc vu 2 he thong
+### PostgreSQL phục vụ 2 hệ thống
 
 ```
 postgres (port 5432)
@@ -484,47 +484,47 @@ postgres (port 5432)
 │   └── table: iceberg_namespace_properties (properties cua database/namespace)
 │
 └── DB: dagster               ← Dagster metadata (runs, events, schedules, sensors)
-    └── (auto-created boi dagster-webserver khi start lan dau)
+  └── (tạo tự động bởi dagster-webserver khi start lần đầu)
 ```
 
-> Iceberg **khong luu data vao PostgreSQL** — PostgreSQL chi luu *con tro metadata* (path toi file `.avro` tren MinIO). Data thuc te (Parquet files) nam tren MinIO tai `s3://cryptoprice/iceberg/`.
+> Iceberg **không lưu data vào PostgreSQL** — PostgreSQL chỉ lưu *con trỏ metadata* (path tới file `.avro` trên MinIO). Dữ liệu thực tế (Parquet files) nằm trên MinIO tại `s3://cryptoprice/iceberg/`.
 
-### Phan bo tai nguyen
+### Phân bổ tài nguyên
 
-> Dua tren may khuyen nghi: **20 GB RAM**, **8 CPU cores**, **SSD**.
+> Dựa trên máy khuyến nghị: **20 GB RAM**, **8 CPU cores**, **SSD**.
 
-| Service | RAM (limit) | RAM (thuong dung) | CPU cores | Ghi chu |
+| Service | RAM (limit) | RAM (thường dùng) | CPU cores | Ghi chú |
 |---|---|---|---|---|
 | **kafka** | 1.5 GB | ~600 MB | 1.0 | JVM heap 1 GB, KRaft overhead |
-| **minio** | 1 GB | ~300 MB | 0.5 | Tang neu co nhieu concurrent write |
-| **minio-init** | 64 MB | ~30 MB | 0.1 | One-shot, thoat sau khi init |
+| **minio** | 1 GB | ~300 MB | 0.5 | Tăng nếu có nhiều concurrent write |
+| **minio-init** | 64 MB | ~30 MB | 0.1 | One-shot, thoát sau khi init |
 | **influxdb** | 1.5 GB | ~500 MB | 0.5 | TSI index + write buffer |
 | **postgres** | 512 MB | ~200 MB | 0.5 | Iceberg metadata + Dagster |
 | **keydb** | 512 MB | ~150 MB | 0.5 | In-memory, ~100k keys latest ticker |
 | **flink-jobmanager** | 1.8 GB | ~1.6 GB | 1.0 | `jobmanager.memory.process.size: 1600m` |
 | **flink-taskmanager** | 2 GB | ~1.7 GB | 1.0 | `taskmanager.memory.process.size: 1728m` |
-| **spark-master** | 1 GB | ~400 MB | 0.5 | Master chi schedule, khong chay task |
+| **spark-master** | 1 GB | ~400 MB | 0.5 | Master chỉ schedule, không chạy task |
 | **spark-worker** | 5 GB | ~4.5 GB | 2.0 | `SPARK_WORKER_MEMORY=4G`, driver ~512 MB overhead |
 | **trino** | 2.5 GB | ~1.5 GB | 1.0 | JVM `-Xmx2G`, heap 2 GB |
 | **dagster-webserver** | 1 GB | ~500 MB | 0.5 | UI + metadata queries |
 | **dagster-daemon** | 512 MB | ~300 MB | 0.5 | Scheduler + sensor loops |
 | **producer** | 256 MB | ~100 MB | 0.2 | Python WS client, I/O-bound |
-| **Tong** | **~19.2 GB** | **~12.4 GB** | **~9.8 cores** | |
+| **Tổng** | **~19.2 GB** | **~12.4 GB** | **~9.8 cores** | |
 
-#### Goi y neu may chi co 16 GB RAM
+#### Gợi ý nếu máy chỉ có 16 GB RAM
 
 ```bash
-# Tat Trino neu khong query batch
+# Tắt Trino nếu không query batch
 docker compose stop trino
 
-# Giam Spark worker memory xuong 2G — sua trong docker-compose.yml:
+# Giảm Spark worker memory xuống 2G — sửa trong docker-compose.yml:
 # SPARK_WORKER_MEMORY: 2G
 
-# Tat Spark History Server (port 18080) neu khong debug
-# Xoa dong SPARK_HISTORY_OPTS trong spark-master
+# Tắt Spark History Server (port 18080) nếu không debug
+# Xoá dòng SPARK_HISTORY_OPTS trong spark-master
 ```
 
-Tong RAM tieu thu khi tat Trino + Spark History: giam ~**2.5 GB**, con ~**10 GB** thuc te.
+Tổng RAM tiêu thụ khi tắt Trino + Spark History: giảm ~**2.5 GB**, còn ~**10 GB** thực tế.
 
 #### Resource limits (production)
 
@@ -555,4 +555,4 @@ services:
           cpus: "1.0"
 ```
 
-> `deploy.resources` chi co hieu luc voi Docker Swarm. Voi `docker compose up` thong thuong, dung `mem_limit` + `cpus` truc tiep o cap service.
+> `deploy.resources` chỉ có hiệu lực với Docker Swarm. Với `docker compose up` thông thường, dùng `mem_limit` + `cpus` trực tiếp ở cấp service.
