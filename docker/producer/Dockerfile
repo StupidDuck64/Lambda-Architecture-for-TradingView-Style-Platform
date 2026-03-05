@@ -6,7 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
 RUN pip install --no-cache-dir \
     kafka-python==2.0.2 \
     requests==2.32.* \
-    websocket-client==1.8.*
+    websocket-client==1.8.* \
+    lz4
 
 WORKDIR /app
 

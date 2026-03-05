@@ -9,7 +9,7 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from pyflink.common import Configuration, Types
 from pyflink.datastream import CheckpointingMode, StreamExecutionEnvironment
-from pyflink.datastream.functions import FlatMapFunction, SinkFunction
+from pyflink.datastream.functions import FlatMapFunction
 from pyflink.datastream.state_backend import HashMapStateBackend
 from pyflink.table import StreamTableEnvironment
 
@@ -31,15 +31,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
-
-
-class NoopSink(SinkFunction):
-    """Terminal sink that discards output.
-    KeyDBWriter / InfluxDBWriter work via side-effects inside flat_map;
-    the downstream stream is always empty, but Flink needs a terminal sink.
-    """
-    def invoke(self, value, context=None):
-        pass
 
 
 class KeyDBWriter(FlatMapFunction):
@@ -224,8 +215,8 @@ def run():
         })
 
     ds_dict = ds_row.map(row_to_dict, output_type=Types.STRING())
-    ds_dict.flat_map(KeyDBWriter(),    output_type=Types.STRING()).name("Write_To_KeyDB").add_sink(NoopSink())
-    ds_dict.flat_map(InfluxDBWriter(), output_type=Types.STRING()).name("Write_To_InfluxDB").add_sink(NoopSink())
+    ds_dict.flat_map(KeyDBWriter(),    output_type=Types.STRING()).name("Write_To_KeyDB").print()
+    ds_dict.flat_map(InfluxDBWriter(), output_type=Types.STRING()).name("Write_To_InfluxDB").print()
 
     env.execute("CryptoTicker_Kafka_to_KeyDB_InfluxDB")
 

@@ -1,7 +1,7 @@
 FROM flink:1.18.1-java11
 
 # ── Python 3.11 ───────────────────────────────────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update -o Acquire::Retries=3 && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-dev wget curl && \
     ln -sf /usr/bin/python3 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
@@ -18,5 +18,8 @@ RUN wget -q -P /opt/flink/lib/ \
 
 # ── Flink config ──────────────────────────────────────────────────────────────
 COPY flink-conf.yaml /opt/flink/conf/flink-conf.yaml
+
+# ── Fix checkpoint directory permissions ──────────────────────────────────────
+RUN mkdir -p /tmp/flink-checkpoints && chown -R flink:flink /tmp/flink-checkpoints
 
 ENV PYFLINK_PYTHON=python3

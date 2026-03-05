@@ -1,32 +1,28 @@
-FROM python:3.11-slim
+# Rebase on apache/spark:3.5.5 — Java + Spark already included, no apt needed
+FROM apache/spark:3.5.5
 
-# ── System deps + Java 11 (for spark-submit) ──────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        openjdk-17-jdk-headless wget curl procps && \
-    rm -rf /var/lib/apt/lists/*
-
-# ── Spark 3.4.1 (spark-submit only, no data processing here) ─────────────────
-ENV SPARK_VERSION=3.4.1
-ENV SPARK_HOME=/opt/spark
-RUN wget -q https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz && \
-    tar -xzf spark-${SPARK_VERSION}-bin-hadoop3.tgz -C /opt && \
-    mv /opt/spark-${SPARK_VERSION}-bin-hadoop3 ${SPARK_HOME} && \
-    rm spark-${SPARK_VERSION}-bin-hadoop3.tgz
-ENV PATH="${SPARK_HOME}/bin:${PATH}"
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+USER root
 
 # ── Python packages ───────────────────────────────────────────────────────────
-RUN pip install --no-cache-dir \
-    dagster==1.9.* \
-    dagster-webserver==1.9.* \
-    dagster-postgres==0.25.* \
-    pyspark==3.4.1 \
-    requests \
-    pyarrow
+RUN python3 -m ensurepip --upgrade 2>/dev/null || true && \
+    pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir \
+        dagster==1.8.* \
+        dagster-webserver==1.8.* \
+        dagster-postgres \
+        requests \
+        pyarrow && \
+    # Downgrade grpcio-health-checking to a version compatible with protobuf 4.x \
+    pip3 install --no-cache-dir --force-reinstall \
+        "grpcio-health-checking>=1.44.0,<1.62.0"
 
 # ── Dagster home & config ─────────────────────────────────────────────────────
 RUN mkdir -p /dagster-home
 COPY dagster.yaml /dagster-home/dagster.yaml
 ENV DAGSTER_HOME=/dagster-home
+ENV SPARK_HOME=/opt/spark
+ENV PATH="${SPARK_HOME}/bin:${PATH}"
+# Use pyspark bundled with the spark image (avoids pip download of 317MB)
+ENV PYTHONPATH="${SPARK_HOME}/python:${SPARK_HOME}/python/lib/py4j-0.10.9.7-src.zip:${PYTHONPATH}"
 
 WORKDIR /app

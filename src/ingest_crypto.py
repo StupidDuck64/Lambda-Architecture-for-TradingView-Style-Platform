@@ -43,6 +43,7 @@ spark = (
     .config("spark.sql.catalog.iceberg_catalog.s3.access-key-id",     MINIO_ACCESS_KEY)
     .config("spark.sql.catalog.iceberg_catalog.s3.secret-access-key", MINIO_SECRET_KEY)
     .config("spark.sql.catalog.iceberg_catalog.s3.path-style-access", "true")
+    .config("spark.sql.catalog.iceberg_catalog.client.region",        "us-east-1")
     .config("spark.hadoop.fs.s3a.endpoint",         MINIO_ENDPOINT)
     .config("spark.hadoop.fs.s3a.access.key",       MINIO_ACCESS_KEY)
     .config("spark.hadoop.fs.s3a.secret.key",       MINIO_SECRET_KEY)

@@ -2,6 +2,7 @@
 import os
 import subprocess
 from pathlib import Path
+from typing import List, Optional
 
 from dagster import (
     AssetExecutionContext,
@@ -20,13 +21,13 @@ SPARK_EVENTS_DIR = Path(os.environ.get("SPARK_EVENTS_DIR", "/opt/spark-events"))
 SPARK_MASTER = os.environ.get("SPARK_MASTER", "spark://spark-master:7077")
 
 SPARK_PACKAGES = ",".join([
-    "org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.5.2",
+    "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2",
     "org.apache.iceberg:iceberg-aws-bundle:1.5.2",
     "org.apache.hadoop:hadoop-aws:3.3.4",
     "org.postgresql:postgresql:42.7.2",
 ])
 
-def _run_spark_job(context: AssetExecutionContext, script_name: str, extra_args: list[str] = None) -> None:
+def _run_spark_job(context: AssetExecutionContext, script_name: str, extra_args: Optional[List[str]] = None) -> None:
     logger = get_dagster_logger()
     script_path = PROJECT_DIR / "src" / script_name
 
