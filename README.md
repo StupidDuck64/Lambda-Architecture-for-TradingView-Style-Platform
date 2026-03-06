@@ -2,7 +2,7 @@
 
 Dự án streaming giá crypto real-time từ Binance WebSocket, xử lý bằng Flink + Spark theo kiến trúc **Lambda** (speed layer + batch layer).
 
-- **Speed layer** (Flink): Kafka → KeyDB + InfluxDB — phục vụ dashboard real-time, cache nóng, time-series chart
+- **Speed layer** (Flink): Kafka → KeyDB + InfluxDB — phục vụ dashboard real-time, cache, time-series chart
 - **Batch layer** (Spark): Kafka → Iceberg trên MinIO — lưu trữ dài hạn, phân tích lịch sử
 - **Query**: Trino SQL trực tiếp lên Iceberg
 - **Orchestration**: Dagster tự động chạy backfill, aggregation, maintenance
@@ -11,21 +11,15 @@ Dự án streaming giá crypto real-time từ Binance WebSocket, xử lý bằng
 
 ## Kiến trúc
 
-```
-Binance WebSocket ──→ Producer ──→ Kafka (4 topics) ──┬──→ Flink ──→ KeyDB (real-time cache)
-                                                       │            ──→ InfluxDB (time-series)
-                                                       │
-                                                       └──→ Spark Streaming ──→ Iceberg (MinIO)
-                                                                                    │
-                                                                               Trino (SQL)
 
+![alt text](image.png)
+
+```
 Dagster (scheduled):
   02:00 AM ── backfill_historical.py ──→ InfluxDB + Iceberg
   03:00 AM ── iceberg_maintenance.py ──→ Compact/Expire Iceberg
   04:00 AM ── aggregate_candles.py   ──→ 1m→1h InfluxDB + Iceberg
 ```
-
-![alt text](image.png)
 
 ## Yêu cầu
 
