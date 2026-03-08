@@ -396,6 +396,32 @@ services:
       start_period: 10s
 
   # ══════════════════════════════════════════════════════════════════════════════
+  # FRONTEND (Nginx + React SPA)
+  # ══════════════════════════════════════════════════════════════════════════════
+
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    image: cryptoprice/nginx:latest
+    container_name: nginx
+    hostname: nginx
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    networks:
+      - crypto-net
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ══════════════════════════════════════════════════════════════════════════════
   # PRODUCER (long-running stream)
   # ══════════════════════════════════════════════════════════════════════════════
 
@@ -437,9 +463,9 @@ services:
       kafka:
         condition: service_healthy
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CANDLE AGGREGATOR (1s → 1m every minute)
-# ══════════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════════════
+  # CANDLE AGGREGATOR (1s → 1m every minute)
+  # ══════════════════════════════════════════════════════════════════════════════
 
   candle-aggregator:
     build:

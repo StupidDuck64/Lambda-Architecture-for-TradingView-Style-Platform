@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-stage build: Node.js (React build) → Nginx (serve + reverse proxy)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Stage 1: Build the React frontend
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+# Install dependencies first (layer caching)
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --production=false 2>/dev/null || npm install
+
+# Copy source and build
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Serve with Nginx
+FROM nginx:1.27-alpine
+
+# Remove default config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Copy custom nginx config
+COPY docker/nginx/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built React app from Stage 1
+COPY --from=build /app/build /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
