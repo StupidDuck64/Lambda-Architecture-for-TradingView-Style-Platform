@@ -64,9 +64,9 @@ services:
       retries: 10
       start_period: 30s
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# SCHEMA REGISTRY  (Apicurio — Confluent-compatible API)
-# ═══════════════════════════════════════════════════════════════════════════════
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # SCHEMA REGISTRY  (Apicurio — Confluent-compatible API)
+  # ═══════════════════════════════════════════════════════════════════════════════
 
   schema-registry:
     image: apicurio/apicurio-registry-mem:2.6.2.Final
@@ -96,8 +96,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
@@ -116,9 +116,12 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     entrypoint: >
       /bin/sh -c "
-        mc alias set local http://minio:9000 minioadmin minioadmin;
+        mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
         mc mb --ignore-existing local/cryptoprice;
         mc mb --ignore-existing local/flink-checkpoints;
         echo 'Buckets ready.';
@@ -134,10 +137,10 @@ services:
       - "8086:8086"
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: adminpass123
-      DOCKER_INFLUXDB_INIT_ORG: vi
-      DOCKER_INFLUXDB_INIT_BUCKET: crypto
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_ADMIN_USER}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_ADMIN_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET}
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
     volumes:
       - influxdb-data:/var/lib/influxdb2
@@ -157,16 +160,16 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: iceberg
-      POSTGRES_PASSWORD: iceberg123
-      POSTGRES_DB: iceberg_catalog
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - crypto-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U iceberg -d iceberg_catalog"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -206,13 +209,13 @@ services:
       KAFKA_BOOTSTRAP: kafka:9092
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      INFLUX_ORG: vi
-      INFLUX_BUCKET: crypto
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
       REDIS_HOST: keydb
       REDIS_PORT: 6379
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
     volumes:
       - ./:/app
@@ -241,13 +244,13 @@ services:
       KAFKA_BOOTSTRAP: kafka:9092
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      INFLUX_ORG: vi
-      INFLUX_BUCKET: crypto
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
       REDIS_HOST: keydb
       REDIS_PORT: 6379
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
     volumes:
       - ./:/app
@@ -272,6 +275,13 @@ services:
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
       SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=/opt/spark-events -Dspark.history.ui.port=18080"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
     volumes:
       - ./:/app
       - spark-events:/opt/spark-events
@@ -295,6 +305,13 @@ services:
       SPARK_WORKER_MEMORY: 3G
       SPARK_WORKER_CORES: 2
       SPARK_WORKER_WEBUI_PORT: 8084
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
     volumes:
       - ./:/app
       - spark-events:/opt/spark-events
@@ -308,13 +325,19 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   trino:
-    image: trinodb/trino:442
+    build:
+      context: ./docker/trino
+    image: cryptoprice/trino:442
     container_name: trino
     hostname: trino
     ports:
       - "8083:8080" # Trino UI (avoid conflict with spark UI on 8082)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
-      - ./docker/trino/etc:/etc/trino:ro
       - trino-data:/data/trino
     networks:
       - crypto-net
@@ -346,8 +369,10 @@ services:
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./:/app
       - dagster-home:/dagster-home
@@ -371,8 +396,10 @@ services:
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./:/app
       - dagster-home:/dagster-home
@@ -400,15 +427,19 @@ services:
       REDIS_PORT: 6379
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      INFLUX_ORG: vi
-      INFLUX_BUCKET: crypto
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
       CORS_ORIGINS: "*"
+      TRINO_HOST: trino
+      TRINO_PORT: 8080
     networks:
       - crypto-net
     depends_on:
       keydb:
         condition: service_healthy
       influxdb:
+        condition: service_healthy
+      trino:
         condition: service_healthy
     healthcheck:
       test:
@@ -466,8 +497,8 @@ services:
     environment:
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      INFLUX_ORG: vi
-      INFLUX_BUCKET: crypto
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
     networks:
       - crypto-net
     depends_on:
@@ -507,14 +538,16 @@ services:
       REDIS_PORT: 6379
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      INFLUX_ORG: vi
-      INFLUX_BUCKET: crypto
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
     volumes:
       - ./src:/app/src
     networks:
       - crypto-net
     depends_on:
       keydb:
+        condition: service_healthy
+      influxdb:
         condition: service_healthy
 
 # candle-aggregator service REMOVED — 1s→1m aggregation now handled

@@ -1,7 +1,12 @@
 import redis.asyncio as aioredis
 from influxdb_client import InfluxDBClient
+import trino
 
-from serving.config import REDIS_HOST, REDIS_PORT, INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG
+from serving.config import (
+    REDIS_HOST, REDIS_PORT,
+    INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG,
+    TRINO_HOST, TRINO_PORT,
+)
 
 _redis: aioredis.Redis | None = None
 _influx: InfluxDBClient | None = None
@@ -22,6 +27,16 @@ def get_influx() -> InfluxDBClient:
     if _influx is None:
         _influx = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
     return _influx
+
+
+def get_trino_connection():
+    return trino.dbapi.connect(
+        host=TRINO_HOST,
+        port=TRINO_PORT,
+        user="fastapi",
+        catalog="iceberg",
+        schema="crypto_lakehouse",
+    )
 
 
 async def close_all():

@@ -14,8 +14,8 @@ import os
 
 KAFKA_SERVER     = os.environ.get("KAFKA_BOOTSTRAP",  "kafka:9092")
 MINIO_ENDPOINT   = os.environ.get("MINIO_ENDPOINT",   "http://minio:9000")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "")
 
 CHECKPOINT_TICKER = "s3a://cryptoprice/checkpoints/crypto_ticker_v1"
 CHECKPOINT_TRADES = "s3a://cryptoprice/checkpoints/crypto_trades_v1"
@@ -35,8 +35,8 @@ spark = (
     .config("spark.sql.catalog.iceberg_catalog.type",            "jdbc")
     .config("spark.sql.catalog.iceberg_catalog.uri",
             f"jdbc:postgresql://{os.environ.get('POSTGRES_HOST', 'postgres')}:5432/iceberg_catalog")
-    .config("spark.sql.catalog.iceberg_catalog.jdbc.user",       "iceberg")
-    .config("spark.sql.catalog.iceberg_catalog.jdbc.password",   "iceberg123")
+    .config("spark.sql.catalog.iceberg_catalog.jdbc.user",       os.environ.get("POSTGRES_USER", ""))
+    .config("spark.sql.catalog.iceberg_catalog.jdbc.password",   os.environ.get("POSTGRES_PASSWORD", ""))
     .config("spark.sql.catalog.iceberg_catalog.warehouse",
             "s3://cryptoprice/iceberg")
     .config("spark.sql.catalog.iceberg_catalog.io-impl",

@@ -13,7 +13,7 @@
 5. [Data Types & Schemas](#5-data-types--schemas)
 6. [Data Flow — End to End](#6-data-flow--end-to-end)
 7. [Component Deep Dives](#7-component-deep-dives)
-8. [Serving Layer Implementation Guide](#8-serving-layer-implementation-guide)
+8. [Serving Layer](#8-serving-layer)
 9. [Docker Compose Integration](#9-docker-compose-integration)
 10. [AWS Cloud Deployment Considerations](#10-aws-cloud-deployment-considerations)
 11. [Appendix](#11-appendix)
@@ -124,7 +124,7 @@ This project implements a **Lambda Architecture** for a real-time cryptocurrency
 │          │    │    └─────────────────────────────────────────────────┘                 │
 │          │    │                                                                         │
 │   ┌──────┴────┴───────────────────────────────────┐                                    │
-│   │              SERVING LAYER (To Build)          │                                    │
+│   │              SERVING LAYER                     │                                    │
 │   │                                                │                                    │
 │   │  ┌─────────────┐   ┌─────────┐  ┌──────────┐  │                                    │
 │   │  │   FastAPI    │   │  Nginx  │  │  React   │  │                                    │
@@ -146,7 +146,7 @@ This project implements a **Lambda Architecture** for a real-time cryptocurrency
 | **Storage**       | KeyDB, InfluxDB, Iceberg/MinIO, PostgreSQL                                         | Hot cache, time-series, data lake, catalog metadata |
 | **Query**         | Trino                                                                              | Ad-hoc SQL queries over Iceberg tables              |
 | **Orchestration** | Dagster                                                                            | Schedule and monitor batch jobs                     |
-| **Serving**       | FastAPI + Nginx + React _(to build)_                                               | REST/WebSocket API + web UI                         |
+| **Serving**       | FastAPI + Nginx + React                                                            | REST/WebSocket API + web UI                         |
 
 ---
 
@@ -177,12 +177,12 @@ This project implements a **Lambda Architecture** for a real-time cryptocurrency
 | **Trino**   | 442     | Distributed SQL query engine over Iceberg | 8083    |
 | **Dagster** | 1.8.x   | Workflow orchestration & scheduling       | 3000    |
 
-### Serving Layer (To Implement)
+### Serving Layer
 
 | Technology  | Version | Role                              | Port(s)             |
 | ----------- | ------- | --------------------------------- | ------------------- |
-| **FastAPI** | 0.110+  | REST + WebSocket API server       | 8000                |
-| **Nginx**   | 1.25+   | Reverse proxy, static file server | 80                  |
+| **FastAPI** | 0.115+  | REST + WebSocket API server       | 8000 (internal)     |
+| **Nginx**   | 1.25    | Reverse proxy, static file server | 80                  |
 | **React**   | 18.3.1  | Frontend SPA (Crypto Dashboard)   | — (served by Nginx) |
 
 ### Frontend Dependencies (Crypto-Dashboard)
@@ -201,9 +201,10 @@ This project implements a **Lambda Architecture** for a real-time cryptocurrency
 ```
 Lambda-Architecture-for-TradingView-Style-Platform/
 │
-├── docker-compose.yml              # 14 services across 4 layers
+├── docker-compose.yml              # 16 services across 5 layers
 ├── spark-defaults.conf             # Spark driver/executor config + Iceberg extensions
-├── README.md                       # Original Vietnamese documentation
+├── README.md                       # Vietnamese documentation
+├── DOCUMENTATION.md                # This file — full technical documentation
 │
 ├── docker/                         # Dockerfiles & service configs
 │   ├── backfill/
@@ -211,9 +212,15 @@ Lambda-Architecture-for-TradingView-Style-Platform/
 │   ├── dagster/
 │   │   ├── Dockerfile              # Spark 3.5.5 base + Dagster 1.8
 │   │   └── dagster.yaml            # PostgreSQL storage, daemon scheduler
+│   ├── fastapi/
+│   │   ├── Dockerfile              # Python 3.11-slim + FastAPI + uvicorn
+│   │   └── requirements.txt        # fastapi, redis, influxdb-client, trino
 │   ├── flink/
 │   │   ├── Dockerfile              # Flink 1.18.1 + Python + Kafka connector
 │   │   └── flink-conf.yaml         # Memory (1.6G JM / 1.7G TM), checkpointing
+│   ├── nginx/
+│   │   ├── Dockerfile              # Multi-stage: Node build React → Nginx alpine
+│   │   └── nginx.conf              # Reverse proxy /api/ → FastAPI, SPA fallback
 │   ├── postgres/
 │   │   └── init.sql                # Creates iceberg_catalog + dagster databases
 │   ├── producer/
@@ -234,44 +241,75 @@ Lambda-Architecture-for-TradingView-Style-Platform/
 │   ├── assets.py                   # 3 Spark job assets with cron schedules
 │   └── workspace.yaml              # Dagster workspace loader config
 │
-└── src/                            # Python source code
-    ├── producer_binance.py         # Binance WebSocket → 4 Kafka topics
-    ├── ingest_flink_crypto.py      # Flink: Kafka → KeyDB + InfluxDB + Iceberg
-    ├── ingest_crypto.py            # (Legacy) Spark Kafka → Iceberg direct
-    ├── backfill_historical.py      # Unified backfill: InfluxDB gaps + Iceberg incremental
-    ├── backfill_influx.py          # (Legacy) InfluxDB-only gap detection
-    ├── aggregate_candles.py        # 1m → 1h candle aggregation + retention
-    ├── iceberg_maintenance.py      # Table compaction, snapshot expiry, orphan cleanup
-    └── ingest_historical_iceberg.py # Standalone Binance → Iceberg historical loader
-
-Crypto-Dashboard/                   # React frontend (separate project)
-├── package.json                    # React 18.3.1 + lightweight-charts + tailwind
-├── tailwind.config.js              # Dark theme, TradingView-style colors
-├── public/
-│   └── index.html                  # SPA entry point
-└── src/
-    ├── App.js                      # Main layout: header + chart + watchlist
-    ├── index.js                    # Root: I18nProvider + AuthProvider
-    ├── components/
-    │   ├── CandlestickChart.js     # TradingView chart with SMA/EMA/RSI/MFI
-    │   ├── ChartOverlay.js         # Drawing tools: trendline, fib, Elliott wave
-    │   ├── DrawingToolbar.js       # Tool selection sidebar
-    │   ├── MarketSelector.js       # Symbol dropdown with categories
-    │   ├── OrderBook.js            # Bid/ask depth visualization
-    │   ├── RecentTrades.js         # Recent trade feed table
-    │   ├── OverviewChart.js        # OHLCV summary with sparkline
-    │   ├── ToolSettingsPopup.js    # Drawing tool configuration
-    │   ├── AuthModal.js            # Login/register modal
-    │   └── LanguageSwitcher.js     # EN/VI language toggle
-    ├── contexts/
-    │   └── AuthContext.js          # Auth state (currently localStorage-based)
-    ├── hooks/
-    │   └── useCandlestickData.js   # Data fetching hook with live subscription
-    ├── services/
-    │   └── marketDataService.js    # API abstraction layer (mock/live toggle)
-    └── i18n/
-        ├── index.js                # I18n context provider
-        └── translations.js         # EN + VI translation strings
+├── schemas/                        # Avro schemas for Kafka topics
+│   ├── depth.avsc
+│   ├── kline.avsc
+│   ├── ticker.avsc
+│   └── trade.avsc
+│
+├── serving/                        # FastAPI backend
+│   ├── __init__.py
+│   ├── main.py                     # App entry, lifespan, CORS, health check
+│   ├── config.py                   # Environment-driven settings
+│   ├── connections.py              # Lazy singletons: Redis, InfluxDB, Trino
+│   └── routers/
+│       ├── __init__.py
+│       ├── klines.py               # OHLCV candle queries (InfluxDB + KeyDB)
+│       ├── historical.py           # Cold-storage candles (Trino → Iceberg)
+│       ├── ticker.py               # Live price from KeyDB
+│       ├── orderbook.py            # Order book depth from KeyDB
+│       ├── trades.py               # Recent price ticks from KeyDB
+│       ├── symbols.py              # Active symbol list from KeyDB
+│       ├── indicators.py           # SMA/EMA indicators from KeyDB
+│       └── ws.py                   # WebSocket real-time candle streaming
+│
+├── src/                            # Python source code (pipeline)
+│   ├── producer_binance.py         # Binance WebSocket → 4 Kafka topics
+│   ├── ingest_flink_crypto.py      # Flink: Kafka → KeyDB + InfluxDB + Iceberg
+│   ├── ingest_crypto.py            # (Legacy) Spark Kafka → Iceberg direct
+│   ├── backfill_historical.py      # Unified backfill: InfluxDB gaps + Iceberg incremental
+│   ├── backfill_influx.py          # (Legacy) InfluxDB-only gap detection
+│   ├── aggregate_candles.py        # 1m → 1h candle aggregation + retention
+│   ├── iceberg_maintenance.py      # Table compaction, snapshot expiry, orphan cleanup
+│   └── ingest_historical_iceberg.py # Standalone Binance → Iceberg historical loader
+│
+└── frontend/                       # React SPA (Crypto Dashboard)
+    ├── package.json                # React 18.3.1 + lightweight-charts + tailwind
+    ├── tailwind.config.js          # Dark theme, TradingView-style colors
+    ├── public/
+    │   └── index.html              # SPA entry point
+    └── src/
+        ├── App.js                  # Main layout: header + chart + watchlist
+        ├── index.js                # Root: ErrorBoundary + I18nProvider
+        ├── components/
+        │   ├── CandlestickChart.js # TradingView chart with indicators + tabs
+        │   ├── ChartOverlay.js     # Drawing tools: trendline, fib, Elliott wave
+        │   ├── DateRangePicker.js  # Historical date range selector
+        │   ├── DrawingToolbar.js   # Tool selection sidebar
+        │   ├── ErrorBoundary.js    # Global error catch with retry
+        │   ├── Header.js           # Top bar + navigation drawer
+        │   ├── LanguageSwitcher.js # EN/VI language toggle
+        │   ├── MarketSelector.js   # Symbol dropdown with search & star
+        │   ├── OrderBook.js        # Bid/ask depth visualization
+        │   ├── OverviewChart.js    # OHLCV summary with sparkline
+        │   ├── RecentTrades.js     # Recent trade feed table
+        │   ├── ToolSettingsPopup.js# Drawing tool configuration
+        │   ├── Watchlist.js        # Right sidebar: symbols + prices + stars
+        │   └── chart/
+        │       ├── chartConstants.js   # Theme, timeframes, tabs, indicator defaults
+        │       ├── indicatorUtils.js   # calcSMA, calcEMA, calcRSI, calcMFI
+        │       ├── IndicatorPanel.js   # Indicator settings panel
+        │       ├── OscillatorPane.js   # RSI/MFI sub-chart
+        │       └── OHLCVBar.js         # Crosshair OHLCV tooltip
+        ├── hooks/
+        │   └── useCandlestickData.js   # Data hook with live WebSocket subscription
+        ├── services/
+        │   └── marketDataService.js    # API abstraction: mock ↔ live toggle
+        ├── utils/
+        │   └── storageHelpers.js       # localStorage JSON helpers
+        └── i18n/
+            ├── index.js                # I18n context provider
+            └── translations.js         # EN + VI translation strings
 ```
 
 ---
@@ -542,15 +580,23 @@ Trino (SQL)
        └── Iceberg metadata (PostgreSQL) → Parquet files (MinIO/S3)
 ```
 
-### 6.4. Serving Path (To Build)
+### 6.4. Serving Path
 
 ```
-React Frontend
+React Frontend (Nginx :80)
    │
-   ├── HTTP GET ──▶ Nginx ──▶ FastAPI ──▶ KeyDB   (latest price, orderbook)
-   ├── HTTP GET ──▶ Nginx ──▶ FastAPI ──▶ InfluxDB (historical candles)
-   ├── HTTP GET ──▶ Nginx ──▶ FastAPI ──▶ Trino    (deep analytics)
-   └── WebSocket ─▶ Nginx ──▶ FastAPI ──▶ KeyDB    (real-time stream)
+   ├── GET /api/ticker, /api/orderbook, /api/symbols
+   │       └──▶ Nginx ──▶ FastAPI ──▶ KeyDB       (live prices, depth, symbol list)
+   │
+   ├── GET /api/klines
+   │       └──▶ Nginx ──▶ FastAPI ──▶ InfluxDB     (OHLCV candles, server-side agg)
+   │                                  └── KeyDB    (fallback for 1s/1m sorted sets)
+   │
+   ├── GET /api/klines/historical
+   │       └──▶ Nginx ──▶ FastAPI ──▶ Trino        (Iceberg cold storage queries)
+   │
+   └── WS  /api/stream
+           └──▶ Nginx ──▶ FastAPI ──▶ KeyDB        (real-time candle push, 500ms)
 ```
 
 ---
@@ -648,424 +694,318 @@ pipe.expire(f"orderbook:{symbol}", 60)
 
 ---
 
-### 7.4. React Dashboard (Crypto-Dashboard)
+### 7.4. React Dashboard (`frontend/`)
 
 **Component Hierarchy**:
 
 ```
-<I18nProvider>
-  <AuthProvider>
-    <App>
-      ├── Header
-      │   ├── Logo + Search
-      │   ├── LanguageSwitcher
-      │   └── Auth Button → AuthModal
-      ├── Main Content
-      │   ├── DrawingToolbar (left sidebar)
-      │   └── CandlestickChart (center)
-      │       ├── Tab: Candlestick → lightweight-charts + indicators
-      │       ├── Tab: Overview → OverviewChart (recharts sparkline)
-      │       ├── Tab: Order Book → OrderBook
-      │       └── Tab: Recent Trades → RecentTrades
-      │       └── ChartOverlay (drawing tools layer)
-      └── Watchlist Sidebar (right)
-    </App>
-  </AuthProvider>
-</I18nProvider>
+<ErrorBoundary>
+  <I18nProvider>
+    <TradingDashboard>
+      ├── Header                   (logo, search, language switcher, nav drawer)
+      ├── Connection Error Banner  (red bar with Retry when API unreachable)
+      ├── DrawingToolbar           (left sidebar)
+      ├── CandlestickChart         (center, tabbed)
+      │   ├── MarketSelector       (symbol dropdown with search & star)
+      │   ├── DateRangePicker      (historical mode trigger)
+      │   ├── Timeframe buttons    (1s, 1m, 5m, 15m, 1H, 4H, 1D, 1W)
+      │   ├── Tab: Candlestick → lightweight-charts + SMA/EMA/RSI/MFI
+      │   │   ├── OHLCVBar         (crosshair tooltip)
+      │   │   ├── OscillatorPane   (RSI/MFI sub-chart)
+      │   │   ├── IndicatorPanel   (settings for all overlays/oscillators)
+      │   │   └── ChartOverlay     (drawing tools layer)
+      │   ├── Tab: Overview → OverviewChart (recharts sparkline)
+      │   ├── Tab: Order Book → OrderBook
+      │   └── Tab: Recent Trades → RecentTrades
+      └── Watchlist                (right sidebar with price/change/star)
+    </TradingDashboard>
+  </I18nProvider>
+</ErrorBoundary>
 ```
 
 **Key Abstraction — `marketDataService.js`**:
 
 ```javascript
-// Toggle between mock data and live API
-const DATA_SOURCE = "mock"; // Change to "api" when backend is ready
-
-const API_BASE_URL =
-  process.env.REACT_APP_API_BASE_URL || "http://localhost:8080/api";
+// Compile-time toggle: "api" for production, "mock" for frontend-only development
+const DATA_SOURCE = process.env.REACT_APP_DATA_SOURCE || "api";
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "/api";
 ```
 
 This service is the **single point of integration** between the React frontend and the backend. It exports:
 
-- `fetchCandles(symbol, timeframe, limit)` → OHLCV array
+- `fetchCandles(symbol, timeframe, limit)` → OHLCV array (InfluxDB via FastAPI)
+- `fetchHistoricalCandles(symbol, startMs, endMs)` → cold-storage candles (Trino via FastAPI)
 - `subscribeCandle(symbol, timeframe, onCandle)` → real-time WebSocket subscription
 - `fetchSymbols()` → available trading pairs
+- `fetchTickers()` → all live tickers for watchlist
+- `fetchOrderBook(symbol)` → order book depth
+- `fetchTrades(symbol, limit)` → recent price ticks
 
 ---
 
-## 8. Serving Layer Implementation Guide
+## 8. Serving Layer
 
-This section details how to implement the missing serving layer: **FastAPI** (backend API), **Nginx** (reverse proxy), and adjustments to the **React** dashboard.
+The serving layer is the user-facing tier of the system, bridging the data pipeline to the browser. It consists of three components: a **FastAPI** REST/WebSocket backend, an **Nginx** reverse proxy, and a **React** single-page application.
 
-### 8.1. FastAPI Backend
+```
+Browser ──▶ Nginx:80
+              ├── /api/*        ──▶ FastAPI:8000 ──▶ KeyDB / InfluxDB / Trino
+              ├── /api/stream   ──▶ FastAPI:8000    (WebSocket, candle streaming)
+              └── /*            ──▶ React SPA        (static build served by Nginx)
+```
+
+### 8.1. FastAPI Backend (`serving/`)
+
+The API server connects to all three storage engines and exposes 8 routers under the `/api` prefix.
 
 #### Directory Structure
 
 ```
-api/
-├── main.py                    # FastAPI application entry point
-├── requirements.txt           # Python dependencies
+serving/
+├── __init__.py
+├── main.py                    # FastAPI app, lifespan, CORS, health check
 ├── config.py                  # Environment-driven configuration
-├── routers/
-│   ├── klines.py              # Candlestick/OHLCV endpoints
-│   ├── ticker.py              # Live price + 24h stats endpoints
-│   ├── orderbook.py           # Order book endpoints
-│   ├── trades.py              # Recent trades endpoints
-│   ├── symbols.py             # Available symbols endpoint
-│   ├── indicators.py          # Technical indicators endpoints
-│   └── auth.py                # Authentication endpoints (optional)
-├── services/
-│   ├── keydb_service.py       # KeyDB (Redis) connection pool
-│   ├── influx_service.py      # InfluxDB query client
-│   └── trino_service.py       # Trino SQL client (for deep queries)
-├── models/
-│   ├── candle.py              # Pydantic models for OHLCV
-│   ├── ticker.py              # Pydantic models for ticker
-│   ├── orderbook.py           # Pydantic models for depth
-│   └── trade.py               # Pydantic models for trades
-└── ws/
-    └── stream.py              # WebSocket manager for real-time push
+├── connections.py             # Lazy singletons: Redis, InfluxDB, Trino
+└── routers/
+    ├── __init__.py
+    ├── klines.py              # GET /api/klines — OHLCV candles (InfluxDB + KeyDB)
+    ├── historical.py          # GET /api/klines/historical — cold storage (Trino)
+    ├── ticker.py              # GET /api/ticker[/{symbol}] — live prices (KeyDB)
+    ├── orderbook.py           # GET /api/orderbook/{symbol} — depth (KeyDB)
+    ├── trades.py              # GET /api/trades/{symbol} — recent ticks (KeyDB)
+    ├── symbols.py             # GET /api/symbols — active trading pairs (KeyDB)
+    ├── indicators.py          # GET /api/indicators/{symbol} — SMA/EMA (KeyDB)
+    └── ws.py                  # WS /api/stream — real-time candle push (KeyDB)
 ```
 
-#### Core Dependencies (`requirements.txt`)
+#### Dependencies (`docker/fastapi/requirements.txt`)
 
 ```
-fastapi==0.115.*
-uvicorn[standard]==0.32.*
-redis[hiredis]==5.2.*
-influxdb-client==1.44.*
-trino==0.330.*
-pydantic==2.*
-python-jose[cryptography]==3.3.*    # JWT auth (optional)
-passlib[bcrypt]==1.7.*              # Password hashing (optional)
+fastapi
+uvicorn[standard]
+redis
+influxdb-client
+trino>=0.330.0
 ```
 
-#### Application Entry Point (`main.py`)
+#### Application Entry Point (`serving/main.py`)
 
 ```python
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import redis.asyncio as redis
+app = FastAPI(title="CryptoDashboard API", version="1.0.0", lifespan=lifespan)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: create connection pools
-    app.state.redis = redis.ConnectionPool.from_url("redis://keydb:6379")
-    yield
-    # Shutdown: close pools
-    await app.state.redis.aclose()
+app.add_middleware(CORSMiddleware,
+    allow_origins=CORS_ORIGINS, allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"])
 
-app = FastAPI(title="CryptoPrice API", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Include routers
-from routers import klines, ticker, orderbook, trades, symbols, indicators
-app.include_router(klines.router, prefix="/api")
-app.include_router(ticker.router, prefix="/api")
-app.include_router(orderbook.router, prefix="/api")
-app.include_router(trades.router, prefix="/api")
-app.include_router(symbols.router, prefix="/api")
-app.include_router(indicators.router, prefix="/api")
+# 8 routers registered under /api
+for router in (ticker, klines, orderbook, trades,
+               symbols, indicators, ws, historical):
+    app.include_router(router)
 ```
 
-#### API Endpoints Specification
+The `/api/health` endpoint pings KeyDB, InfluxDB, and Trino, returning `"ok"` or `"degraded"` with per-service diagnostics.
 
-##### Klines (Candlestick Data)
+#### Configuration (`serving/config.py`)
 
-```
-GET /api/klines?symbol=BTCUSDT&interval=1m&limit=200
-```
+All settings are driven by environment variables with sensible defaults for Docker:
 
-**Strategy**: Route to different backends based on timeframe:
+| Variable        | Default                | Purpose                    |
+| --------------- | ---------------------- | -------------------------- |
+| `REDIS_HOST`    | `keydb`                | KeyDB hostname             |
+| `REDIS_PORT`    | `6379`                 | KeyDB port                 |
+| `INFLUX_URL`    | `http://influxdb:8086` | InfluxDB endpoint          |
+| `INFLUX_TOKEN`  | _(empty)_              | InfluxDB auth token        |
+| `INFLUX_ORG`    | `vi`                   | InfluxDB organization      |
+| `INFLUX_BUCKET` | `crypto`               | InfluxDB bucket            |
+| `TRINO_HOST`    | `trino`                | Trino coordinator hostname |
+| `TRINO_PORT`    | `8080`                 | Trino coordinator port     |
+| `CORS_ORIGINS`  | `*`                    | Comma-separated CORS list  |
 
-- `1m`, `5m`, `15m` → **InfluxDB** (measurement: `candles`, aggregate on the fly for 5m/15m)
-- `1h`, `4h` → **InfluxDB** (`candles` with interval tag) or **Iceberg** via Trino for older data
-- `1d`, `1w` → **Trino** (query `coin_klines_hourly` or `historical_hourly` and aggregate)
+#### Connection Management (`serving/connections.py`)
 
-```python
-# Example: klines.py router
-from fastapi import APIRouter, Query
-router = APIRouter()
+Lazy singletons for each backend — created on first use, closed on shutdown:
 
-@router.get("/klines")
-async def get_klines(
-    symbol: str = Query(..., description="Trading pair, e.g. BTCUSDT"),
-    interval: str = Query("1h", regex="^(1m|5m|15m|1h|4h|1d|1w)$"),
-    limit: int = Query(200, ge=1, le=1500),
-):
-    if interval in ("1m", "5m", "15m"):
-        return await query_influxdb_candles(symbol, interval, limit)
-    elif interval in ("1h", "4h"):
-        return await query_influxdb_or_iceberg(symbol, interval, limit)
-    else:
-        return await query_trino_historical(symbol, interval, limit)
-```
+- **KeyDB**: `redis.asyncio.Redis` with `decode_responses=True` and `socket_keepalive`.
+- **InfluxDB**: `InfluxDBClient` (synchronous, wrapped in `asyncio.to_thread` at the call site).
+- **Trino**: `trino.dbapi.connect()` with catalog `iceberg`, schema `crypto_lakehouse`, user `fastapi`.
 
-**Response Format** (matches what React expects):
+The `close_all()` coroutine is called from the FastAPI `lifespan` shutdown hook.
+
+#### API Endpoints
+
+##### `GET /api/klines` — OHLCV Candles
+
+| Parameter  | Type   | Default | Constraint    | Description                              |
+| ---------- | ------ | ------- | ------------- | ---------------------------------------- |
+| `symbol`   | string | _(req)_ | `^[A-Z0-9]+$` | Trading pair, e.g. `BTCUSDT`             |
+| `interval` | string | `1m`    | see below     | `1s`,`1m`,`5m`,`15m`,`1h`,`4h`,`1d`,`1w` |
+| `limit`    | int    | 200     | 1–1500        | Number of candles to return              |
+
+**Data routing strategy**:
+
+| Requested interval     | Data source                                                      |
+| ---------------------- | ---------------------------------------------------------------- |
+| `1s`                   | KeyDB sorted set `candle:1s:{symbol}`                            |
+| `1m`                   | InfluxDB measurement `candles` (interval=1m)                     |
+| `5m`, `15m`            | InfluxDB 1m candles → server-side OHLCV aggregation              |
+| `1h`, `4h`, `1d`, `1w` | InfluxDB 1h candles → aggregation; 1m fallback if 1h unavailable |
+
+When InfluxDB returns no data, the endpoint falls back to KeyDB sorted sets (`candle:1m:{symbol}`, then `candle:1s:{symbol}`).
+
+Aggregation is performed server-side using a bucket-based OHLCV re-sampler: group candles by `floor(openTime / target_ms)`, take first open / max high / min low / last close / sum volume.
+
+**Response shape**:
 
 ```json
-[
-  { "time": 1710000000, "open": 67480.0, "high": 67520.0, "low": 67470.0, "close": 67500.5, "volume": 12.345 },
-  ...
-]
+[{"openTime": 1710000000000, "open": 67480.0, "high": 67520.0, "low": 67470.0, "close": 67500.5, "volume": 12.345}, ...]
 ```
 
-##### Ticker (Live Prices)
+##### `GET /api/klines/historical` — Cold-Storage Candles (Trino → Iceberg)
 
-```
-GET /api/ticker/{symbol}
-GET /api/ticker                  # All symbols (for watchlist)
-```
+| Parameter   | Type | Default | Constraint        | Description  |
+| ----------- | ---- | ------- | ----------------- | ------------ |
+| `symbol`    | str  | _(req)_ | `^[A-Z0-9]+$`     | Trading pair |
+| `startTime` | int  | _(req)_ | epoch ms          | Range start  |
+| `endTime`   | int  | _(req)_ | epoch ms, > start | Range end    |
+| `limit`     | int  | 500     | 1–5000            | Max rows     |
 
-**Strategy**: Read directly from **KeyDB** (`ticker:latest:{symbol}` hash).
+Queries `coin_klines_hourly` first; if empty, falls back to `historical_hourly`. Returns 1H candles. Range capped at 1 year. Uses parameterized SQL queries to prevent injection.
 
-```python
-@router.get("/ticker/{symbol}")
-async def get_ticker(symbol: str):
-    data = await redis_client.hgetall(f"ticker:latest:{symbol}")
-    return {
-        "symbol": symbol,
-        "price": float(data[b"price"]),
-        "bid": float(data[b"bid"]),
-        "ask": float(data[b"ask"]),
-        "volume": float(data[b"volume"]),
-        "event_time": int(data[b"event_time"]),
-    }
+##### `GET /api/ticker/{symbol}` / `GET /api/ticker`
 
-@router.get("/ticker")
-async def get_all_tickers():
-    # SCAN for all ticker:latest:* keys
-    tickers = []
-    async for key in redis_client.scan_iter("ticker:latest:*"):
-        symbol = key.decode().split(":")[-1]
-        data = await redis_client.hgetall(key)
-        tickers.append({...})
-    return tickers
-```
+Reads `ticker:latest:{symbol}` hashes from KeyDB. The list endpoint (`/api/ticker`) scans all `ticker:latest:*` keys and returns a sorted array. Fields: `symbol`, `price`, `change24h`, `bid`, `ask`, `volume`, `event_time`.
 
-##### Order Book
+##### `GET /api/orderbook/{symbol}`
 
-```
-GET /api/orderbook/{symbol}?depth=20
-```
+Reads `orderbook:{symbol}` hash from KeyDB. Returns `bids`, `asks` (as `[[price, qty], ...]`), `spread`, `best_bid`, `best_ask`, `event_time`.
 
-**Strategy**: Read from **KeyDB** (`orderbook:{symbol}` hash).
+##### `GET /api/trades/{symbol}?limit=50`
 
-```python
-@router.get("/orderbook/{symbol}")
-async def get_orderbook(symbol: str, depth: int = Query(20, ge=1, le=50)):
-    data = await redis_client.hgetall(f"orderbook:{symbol}")
-    bids = json.loads(data[b"bids"])[:depth]
-    asks = json.loads(data[b"asks"])[:depth]
-    return {
-        "symbol": symbol,
-        "bids": [{"price": b[0], "amount": b[1]} for b in bids],
-        "asks": [{"price": a[0], "amount": a[1]} for a in asks],
-        "spread": float(data.get(b"spread", 0)),
-    }
-```
+Reads the `ticker:history:{symbol}` sorted set (reverse chronological). Derives `side` (buy/sell) by comparing successive prices. Returns `[{time, price, volume, side}]`.
 
-##### Recent Trades
+##### `GET /api/symbols`
 
-```
-GET /api/trades/{symbol}?limit=50
-```
+Scans `ticker:latest:*` keys in KeyDB. For each key, extracts the symbol name and derives a display name (e.g. `BTCUSDT` → `BTC / USDT`). Returns `[{symbol, name, type: "crypto"}]`.
 
-**Strategy**: Query **Trino** against `coin_trades` Iceberg table (latest N trades).
+##### `GET /api/indicators/{symbol}`
 
-```python
-@router.get("/trades/{symbol}")
-async def get_recent_trades(symbol: str, limit: int = Query(50, ge=1, le=200)):
-    query = f"""
-        SELECT trade_timestamp, price, quantity, is_buyer_maker
-        FROM iceberg_catalog.crypto_lakehouse.coin_trades
-        WHERE symbol = '{symbol}'
-        ORDER BY trade_timestamp DESC
-        LIMIT {limit}
-    """
-    # Use parameterized queries in production to prevent SQL injection
-    rows = await trino_client.execute(query)
-    return [format_trade(row) for row in rows]
-```
+Reads `indicator:latest:{symbol}` hash from KeyDB. Returns `sma20`, `sma50`, `ema12`, `ema26`, `timestamp`.
 
-> **Important**: Use parameterized queries or Trino's prepared statements in production. The example above is simplified for illustration.
+##### `WS /api/stream?symbol=BTCUSDT&interval=1m` — Real-Time Candle Streaming
 
-##### Symbols
+WebSocket endpoint that pushes OHLCV frames at ~500ms intervals. The server builds the current candle from KeyDB data, sending only when the value changes from the previous frame.
 
-```
-GET /api/symbols
-```
+**Interval routing**:
 
-**Strategy**: Derive from KeyDB keys (`ticker:latest:*`) or maintain a static config.
+| Interval | KeyDB source                                                                                       |
+| -------- | -------------------------------------------------------------------------------------------------- |
+| `1s`     | Latest entry from `candle:1s:{symbol}` sorted set                                                  |
+| `1m`     | `candle:latest:{symbol}` hash (written by Flink)                                                   |
+| `5m`+    | Aggregate entries from `candle:1m:{symbol}` within the current window; fallback to `candle:latest` |
 
-```python
-@router.get("/symbols")
-async def get_symbols():
-    symbols = []
-    async for key in redis_client.scan_iter("ticker:latest:*"):
-        sym = key.decode().split(":")[-1]
-        symbols.append({
-            "symbol": sym,
-            "name": sym.replace("USDT", "/USDT"),
-            "type": "crypto"
-        })
-    return sorted(symbols, key=lambda s: s["symbol"])
-```
+**Frame shape**: `{"openTime": ms, "open": float, "high": float, "low": float, "close": float, "volume": float}`
 
-##### Technical Indicators
-
-```
-GET /api/indicators/{symbol}
-```
-
-**Strategy**: Read from **KeyDB** (`indicator:latest:{symbol}` hash).
-
-```python
-@router.get("/indicators/{symbol}")
-async def get_indicators(symbol: str):
-    data = await redis_client.hgetall(f"indicator:latest:{symbol}")
-    return {
-        "symbol": symbol,
-        "sma20": float(data.get(b"sma20", 0)),
-        "sma50": float(data.get(b"sma50", 0)),
-        "ema12": float(data.get(b"ema12", 0)),
-        "ema26": float(data.get(b"ema26", 0)),
-        "timestamp": data.get(b"ts", b"").decode(),
-    }
-```
-
-#### WebSocket Endpoint (Real-Time Streaming)
-
-```
-WS /api/ws/stream?symbols=BTCUSDT,ETHUSDT
-```
-
-**Strategy**: Subscribe to KeyDB pub/sub or poll KeyDB keys and push updates to connected clients.
-
-```python
-from fastapi import WebSocket, WebSocketDisconnect
-
-@app.websocket("/api/ws/stream")
-async def websocket_stream(websocket: WebSocket, symbols: str = "BTCUSDT"):
-    await websocket.accept()
-    symbol_list = [s.strip().upper() for s in symbols.split(",")]
-
-    try:
-        while True:
-            for sym in symbol_list:
-                # Read latest data from KeyDB
-                ticker = await redis_client.hgetall(f"ticker:latest:{sym}")
-                candle = await redis_client.hgetall(f"candle:latest:{sym}")
-                if ticker:
-                    await websocket.send_json({
-                        "type": "ticker",
-                        "symbol": sym,
-                        "data": format_ticker(ticker)
-                    })
-                if candle:
-                    await websocket.send_json({
-                        "type": "candle",
-                        "symbol": sym,
-                        "data": format_candle(candle)
-                    })
-            await asyncio.sleep(1)  # Push interval (1 second)
-    except WebSocketDisconnect:
-        pass
-```
-
-> **Optimization**: For production, use Redis/KeyDB pub/sub with `SUBSCRIBE` instead of polling. Have Flink publish to a dedicated channel after each write.
-
-#### Dockerfile (`docker/api/Dockerfile`)
+#### Dockerfile (`docker/fastapi/Dockerfile`)
 
 ```dockerfile
 FROM python:3.11-slim
-
 WORKDIR /app
-
-COPY api/requirements.txt .
+COPY docker/fastapi/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-COPY api/ /app/
-
+COPY serving/ /app/serving/
 EXPOSE 8000
+CMD ["uvicorn", "serving.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+#### Docker Compose Service
+
+```yaml
+fastapi:
+  build:
+    context: .
+    dockerfile: docker/fastapi/Dockerfile
+  ports:
+    - "8080:8000" # Also exposed directly for debugging
+  environment:
+    REDIS_HOST: keydb
+    INFLUX_URL: http://influxdb:8086
+    INFLUX_TOKEN: ${INFLUX_TOKEN}
+    TRINO_HOST: trino
+    TRINO_PORT: 8080
+    CORS_ORIGINS: "*"
+  depends_on:
+    keydb: { condition: service_healthy }
+    influxdb: { condition: service_healthy }
+    trino: { condition: service_healthy }
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "python",
+        "-c",
+        "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')",
+      ]
 ```
 
 ---
 
-### 8.2. Nginx Reverse Proxy
+### 8.2. Nginx Reverse Proxy (`docker/nginx/`)
 
-Nginx serves as the unified entry point, routing requests to either the React static files or the FastAPI backend.
+Nginx is the single entry point at port **80**. It serves the React build as static files and reverse-proxies `/api/*` requests to FastAPI.
 
-#### Configuration (`docker/nginx/nginx.conf`)
+#### Configuration Highlights (`docker/nginx/nginx.conf`)
 
 ```nginx
-upstream fastapi {
-    server api:8000;
+upstream fastapi_backend {
+    server fastapi:8000;
 }
 
 server {
     listen 80;
-    server_name _;
 
-    # React SPA static files
-    root /usr/share/nginx/html;
-    index index.html;
-
-    # API requests → FastAPI
+    # API + WebSocket → FastAPI
     location /api/ {
-        proxy_pass http://fastapi;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # WebSocket upgrade for /api/ws/
-    location /api/ws/ {
-        proxy_pass http://fastapi;
+        proxy_pass http://fastapi_backend;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_read_timeout 86400;
+        proxy_read_timeout 86400;          # 24h for WebSocket
     }
 
-    # React SPA fallback (client-side routing)
+    # React SPA fallback
     location / {
+        root /usr/share/nginx/html;
+        index index.html;
         try_files $uri $uri/ /index.html;
     }
 
-    # Cache static assets
+    # Long-lived cache for hashed static assets
     location /static/ {
+        root /usr/share/nginx/html;
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
 
-    # Gzip
     gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml;
+    gzip_types text/plain text/css application/json application/javascript;
     gzip_min_length 256;
 }
 ```
 
+A single `location /api/` block handles both REST and WebSocket traffic. The `Upgrade` / `Connection` headers are always set; for plain HTTP requests they are simply ignored by FastAPI.
+
 #### Dockerfile (`docker/nginx/Dockerfile`)
+
+Multi-stage build: Node 20 builds the React app, then the output is copied into `nginx:1.25-alpine`.
 
 ```dockerfile
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY Crypto-Dashboard/package.json Crypto-Dashboard/package-lock.json* ./
-RUN npm ci
-COPY Crypto-Dashboard/ .
-ENV REACT_APP_API_BASE_URL=/api
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --ignore-scripts
+COPY frontend/ .
 RUN npm run build
 
 FROM nginx:1.25-alpine
@@ -1074,171 +1014,129 @@ COPY --from=build /app/build /usr/share/nginx/html
 EXPOSE 80
 ```
 
-> **Note**: This is a multi-stage build. The first stage builds the React app, the second stage serves it via Nginx. The `REACT_APP_API_BASE_URL=/api` env var ensures the React app uses relative paths, which Nginx proxies to FastAPI.
+The React build uses `REACT_APP_API_BASE_URL=/api` (relative), so the SPA works seamlessly behind Nginx without any CORS issues.
 
 ---
 
-### 8.3. React Dashboard Adjustments
+### 8.3. React Dashboard (`frontend/`)
 
-The React dashboard is intentionally designed with a clean abstraction layer (`marketDataService.js`). Only a few files need modification to connect to the live backend.
+A React 18.3 SPA styled with Tailwind CSS and powered by `lightweight-charts` 5.1 for TradingView-style candlestick rendering.
 
-#### 8.3.1. `marketDataService.js` — Switch to Live API
+#### Component Hierarchy
 
-The main change is switching `DATA_SOURCE` from `"mock"` to `"api"` and updating the API functions:
+```
+<ErrorBoundary>
+  <I18nProvider>
+    <TradingDashboard>
+      ├── Header                   (logo, search, language switcher, nav drawer)
+      ├── Connection Error Banner  (red bar when API unreachable, with Retry)
+      ├── DrawingToolbar           (left sidebar: cursor, line, fib, wave tools)
+      ├── CandlestickChart         (center, tabbed)
+      │   ├── MarketSelector       (symbol dropdown with search & star)
+      │   ├── DateRangePicker      (historical mode: start/end datetime → Trino)
+      │   ├── Timeframe buttons    (1s, 1m, 5m, 15m, 1H, 4H, 1D, 1W)
+      │   ├── Tab: Candlestick     (lightweight-charts + SMA/EMA overlays)
+      │   │   ├── OHLCVBar         (crosshair tooltip: O/H/L/C/V)
+      │   │   ├── OscillatorPane   (RSI / MFI sub-chart)
+      │   │   ├── IndicatorPanel   (settings for SMA/EMA/RSI/MFI/Volume)
+      │   │   └── ChartOverlay     (drawing tools layer: trendline, fib, Elliott)
+      │   ├── Tab: Overview        (OverviewChart — recharts sparkline)
+      │   ├── Tab: Order Book      (OrderBook — bid/ask depth bars)
+      │   └── Tab: Recent Trades   (RecentTrades — price tick feed)
+      └── Watchlist                (right sidebar: symbol list with price/change/star)
+    </TradingDashboard>
+  </I18nProvider>
+</ErrorBoundary>
+```
+
+#### Data Service Abstraction (`marketDataService.js`)
+
+All backend communication is isolated in a single service module. A compile-time toggle (`REACT_APP_DATA_SOURCE`) switches between mock data and the live API:
 
 ```javascript
-// Change this:
-const DATA_SOURCE = "mock";
-// To this:
-const DATA_SOURCE = "api";
-
-// API_BASE_URL will work as-is when served through Nginx:
+const DATA_SOURCE = process.env.REACT_APP_DATA_SOURCE || "api"; // "mock" for development
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "/api";
 ```
 
-The `fetchCandles` function in API mode should call:
+**Exported functions**:
 
-```javascript
-async function fetchCandlesFromAPI(symbol, timeframe, limit) {
-  const res = await fetch(
-    `${API_BASE_URL}/klines?symbol=${symbol}&interval=${timeframe}&limit=${limit}`,
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json(); // Expects [{time, open, high, low, close, volume}, ...]
-}
+| Function                                      | API Endpoint                 | Purpose                        |
+| --------------------------------------------- | ---------------------------- | ------------------------------ |
+| `fetchCandles(sym, tf, limit)`                | `GET /api/klines`            | Historical OHLCV candles       |
+| `fetchHistoricalCandles(sym, startMs, endMs)` | `GET /api/klines/historical` | Cold-storage candles via Trino |
+| `subscribeCandle(sym, tf, onCandle)`          | `WS /api/stream`             | Real-time candle updates       |
+| `fetchSymbols()`                              | `GET /api/symbols`           | Active trading pairs           |
+| `fetchTickers()`                              | `GET /api/ticker`            | All tickers for watchlist      |
+| `fetchOrderBook(sym)`                         | `GET /api/orderbook/{sym}`   | Order book depth               |
+| `fetchTrades(sym, n)`                         | `GET /api/trades/{sym}`      | Recent price ticks             |
+
+In mock mode, each function generates deterministic sample data with realistic price patterns, enabling full frontend development without running the backend.
+
+#### Real-Time Data Flow
+
+```
+CandlestickChart mount
+  │
+  ├── fetchCandles(symbol, timeframe, 200) → REST → populate chart
+  │
+  └── subscribeCandle(symbol, timeframe, onCandle)
+        │
+        └── WebSocket /api/stream?symbol=BTCUSDT&interval=1m
+              │
+              └── onCandle({time, open, high, low, close, volume})
+                    │
+                    └── chart.update(candle)  ← live bar updates in-place
 ```
 
-The `subscribeCandle` function should connect to the WebSocket:
+#### Error Handling Architecture
 
-```javascript
-function subscribeCandleFromAPI(symbol, timeframe, onCandle) {
-  const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/ws/stream?symbols=${symbol}`;
-  const ws = new WebSocket(wsUrl);
+| Layer          | Component          | Behavior                                                                                |
+| -------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| **Global**     | `ErrorBoundary`    | Catches unhandled render errors; shows a full-page error screen with "Try again" button |
+| **Connection** | `App.js`           | `connError` state; red banner with Retry when `fetchSymbols` or `fetchTickers` fails    |
+| **Chart data** | `CandlestickChart` | `fetchError` + `retryCount` state; red overlay "Failed to load candle data" with Retry  |
+| **Order book** | `OrderBook`        | `error` state; inline error message when fetch fails and data is empty                  |
+| **Trades**     | `RecentTrades`     | `error` state; inline error message, auto-clears on next successful fetch               |
 
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === "candle" && msg.symbol === symbol) {
-      onCandle(msg.data);
-    }
-  };
+#### Key Sub-Modules
 
-  ws.onclose = () => {
-    // Auto-reconnect after 3 seconds
-    setTimeout(() => subscribeCandleFromAPI(symbol, timeframe, onCandle), 3000);
-  };
+| Module              | File                | Purpose                                                                   |
+| ------------------- | ------------------- | ------------------------------------------------------------------------- |
+| `chartConstants.js` | `components/chart/` | Theme colors, timeframe list, tab definitions, default indicator settings |
+| `indicatorUtils.js` | `components/chart/` | Pure functions: `calcSMA`, `calcEMA`, `calcRSI`, `calcMFI`                |
+| `IndicatorPanel.js` | `components/chart/` | Settings panel for overlays/oscillators                                   |
+| `OscillatorPane.js` | `components/chart/` | RSI/MFI sub-chart below the main chart                                    |
+| `OHLCVBar.js`       | `components/chart/` | Crosshair tooltip bar                                                     |
+| `storageHelpers.js` | `utils/`            | `loadFromStorage` / `saveToStorage` (localStorage JSON wrappers)          |
 
-  return () => ws.close(); // Return unsubscribe function
-}
-```
+#### Internationalization
 
-#### 8.3.2. `App.js` — Dynamic Watchlist
+`i18n/` provides an `I18nProvider` context with **English** and **Vietnamese** translations. The `LanguageSwitcher` component toggles between `en` and `vi`. All user-visible strings (buttons, labels, headings) use the `t()` translation function.
 
-Replace the static `watchlistItems` array with a live API call:
+#### Historical Mode
 
-```javascript
-// Replace static watchlistItems with:
-useEffect(() => {
-  fetch("/api/ticker")
-    .then((res) => res.json())
-    .then((tickers) => {
-      setWatchlistItems(
-        tickers.map((t) => ({
-          symbol: t.symbol,
-          price: t.price,
-          change: t.price_change_pct || 0,
-          color: (t.price_change_pct || 0) >= 0 ? "green" : "red",
-        })),
-      );
-    })
-    .catch(console.error);
-}, []);
-```
+When the user selects a date range via `DateRangePicker`, the chart enters **historical mode**:
 
-#### 8.3.3. `OrderBook.js` — Live Order Book
-
-Replace the `generateOrderBook` mock function with an API call:
-
-```javascript
-useEffect(() => {
-  const fetchOrderBook = async () => {
-    const res = await fetch(`/api/orderbook/${symbol}?depth=20`);
-    const data = await res.json();
-    setOrderBook(data);
-  };
-  fetchOrderBook();
-  const interval = setInterval(fetchOrderBook, 1000); // Refresh every second
-  return () => clearInterval(interval);
-}, [symbol]);
-```
-
-#### 8.3.4. `RecentTrades.js` — Live Trades
-
-Replace the `generateRecentTrades` mock with an API call:
-
-```javascript
-useEffect(() => {
-  const fetchTrades = async () => {
-    const res = await fetch(`/api/trades/${symbol}?limit=50`);
-    const data = await res.json();
-    setTrades(data);
-  };
-  fetchTrades();
-  const interval = setInterval(fetchTrades, 2000); // Refresh every 2 seconds
-  return () => clearInterval(interval);
-}, [symbol]);
-```
-
-#### 8.3.5. `AuthContext.js` — Backend Authentication (Optional)
-
-Replace localStorage-based auth with JWT-based API auth:
-
-```javascript
-const login = useCallback(async (email, password) => {
-  const res = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    return { success: false, error: err.detail };
-  }
-  const { token, user } = await res.json();
-  sessionStorage.setItem("token", token);
-  setUser(user);
-  return { success: true };
-}, []);
-```
-
-#### 8.3.6. Symbol Naming Alignment
-
-The React app currently uses symbols like `BTCUSD`, while Binance and the backend use `BTCUSDT`. Align the symbols:
-
-- In `MarketSelector.js`: Update `SYMBOL_META` keys from `BTCUSD` → `BTCUSDT`
-- In `App.js`: Update `watchlistItems` symbols
-- In `CandlestickChart.js`: Update `SYMBOLS` array
-- Or handle mapping in FastAPI (accept both `BTCUSD` and `BTCUSDT`)
+1. Timeframe buttons are replaced with a "1H (historical)" label.
+2. `fetchHistoricalCandles(symbol, startMs, endMs)` queries `GET /api/klines/historical`.
+3. FastAPI routes the query through Trino to Iceberg cold storage (`coin_klines_hourly` → `historical_hourly` fallback).
+4. Clearing the date range returns to live mode with WebSocket streaming.
 
 ---
 
 ## 9. Docker Compose Integration
 
-### 9.1. New Services to Add
+### 9.1. Serving Layer Services
 
-Add these services to the existing `docker-compose.yml`:
+The serving layer adds two services to `docker-compose.yml`:
 
 ```yaml
-# ══════════════════════════════════════════════════════════════════════════════
-# SERVING LAYER
-# ══════════════════════════════════════════════════════════════════════════════
-
-api:
+fastapi:
   build:
     context: .
-    dockerfile: docker/api/Dockerfile
-  container_name: api
-  hostname: api
-  restart: unless-stopped
+    dockerfile: docker/fastapi/Dockerfile
+  ports:
+    - "8080:8000" # 8080 exposed for direct debugging
   environment:
     REDIS_HOST: keydb
     REDIS_PORT: 6379
@@ -1246,46 +1144,37 @@ api:
     INFLUX_TOKEN: ${INFLUX_TOKEN}
     INFLUX_ORG: vi
     INFLUX_BUCKET: crypto
+    CORS_ORIGINS: "*"
     TRINO_HOST: trino
     TRINO_PORT: 8080
-  networks:
-    - crypto-net
   depends_on:
-    keydb:
-      condition: service_healthy
-    influxdb:
-      condition: service_healthy
-    trino:
-      condition: service_healthy
+    keydb: { condition: service_healthy }
+    influxdb: { condition: service_healthy }
+    trino: { condition: service_healthy }
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
-    interval: 15s
-    timeout: 5s
-    retries: 5
+    test:
+      [
+        "CMD",
+        "python",
+        "-c",
+        "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')",
+      ]
 
 nginx:
   build:
     context: .
     dockerfile: docker/nginx/Dockerfile
-  container_name: nginx
-  hostname: nginx
   ports:
     - "80:80"
-  networks:
-    - crypto-net
   depends_on:
-    api:
-      condition: service_healthy
+    fastapi: { condition: service_healthy }
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:80"]
-    interval: 15s
-    timeout: 5s
-    retries: 5
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
 ```
 
-### 9.2. Updated Service Map
+### 9.2. Complete Service Map
 
-After adding the serving layer, the full stack consists of **16 services**:
+The full stack consists of **16 services**:
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
@@ -1301,29 +1190,28 @@ After adding the serving layer, the full stack consists of **16 services**:
 ├──────────────┼────────────────────────────────────────────────────┤
 │  PRODUCER    │  producer, influx-backfill                         │
 ├──────────────┼────────────────────────────────────────────────────┤
-│  SERVING     │  api (FastAPI), nginx (React + Reverse Proxy)     │
-│  (NEW)       │                                                    │
+│  SERVING     │  fastapi, nginx (React SPA + Reverse Proxy)       │
 └──────────────┴────────────────────────────────────────────────────┘
 ```
 
 ### 9.3. Port Allocation
 
-| Service         | Internal Port | External Port  | Purpose                 |
-| --------------- | :-----------: | :------------: | ----------------------- |
-| Kafka           |     9092      |      9092      | Broker (debugging)      |
-| MinIO           |  9000, 9001   |   9000, 9001   | S3 API, Console         |
-| InfluxDB        |     8086      |      8086      | Time-series UI          |
-| PostgreSQL      |     5432      |      5432      | Database access         |
-| KeyDB           |     6379      |      6379      | Redis CLI debugging     |
-| Flink UI        |     8081      |      8081      | Flink Dashboard         |
-| Spark Master UI |     8080      |      8082      | Spark Dashboard         |
-| Spark History   |     18080     |     18080      | Job History             |
-| Trino UI        |     8080      |      8083      | Trino Dashboard         |
-| Dagster UI      |     3000      |      3000      | Orchestration Dashboard |
-| **FastAPI**     |   **8000**    | **(internal)** | **API (via Nginx)**     |
-| **Nginx**       |    **80**     |     **80**     | **Web UI + API Proxy**  |
+| Service         | Internal Port | External Port | Purpose                  |
+| --------------- | :-----------: | :-----------: | ------------------------ |
+| Kafka           |     9092      |     9092      | Broker (debugging)       |
+| MinIO           |  9000, 9001   |  9000, 9001   | S3 API, Console          |
+| InfluxDB        |     8086      |     8086      | Time-series UI           |
+| PostgreSQL      |     5432      |     5432      | Database access          |
+| KeyDB           |     6379      |     6379      | Redis CLI debugging      |
+| Flink UI        |     8081      |     8081      | Flink Dashboard          |
+| Spark Master UI |     8080      |     8082      | Spark Dashboard          |
+| Spark History   |     18080     |     18080     | Job History              |
+| Trino UI        |     8080      |     8083      | Trino Dashboard          |
+| Dagster UI      |     3000      |     3000      | Orchestration Dashboard  |
+| **FastAPI**     |   **8000**    |   **8080**    | **API (also via Nginx)** |
+| **Nginx**       |    **80**     |    **80**     | **Web UI + API Proxy**   |
 
-> **Note**: FastAPI's port 8000 is **not exposed externally**. All traffic goes through Nginx on port 80. This simplifies CORS, provides a single entry point, and enables WebSocket proxying.
+> **Note**: FastAPI is accessible both directly at port 8080 (for debugging) and through Nginx at port 80. In production, only Nginx on port 80 should be exposed.
 
 ### 9.4. Startup Order
 
@@ -1343,28 +1231,41 @@ docker compose up -d producer influx-backfill
 # Phase 5: Submit Flink job
 docker exec flink-jobmanager flink run -py /app/src/ingest_flink_crypto.py -d
 
-# Phase 6: Serving layer
-docker compose up -d api nginx
+# Phase 6: Serving layer (FastAPI waits for keydb + influxdb + trino healthy)
+docker compose up -d fastapi nginx
 
 # Or simply:
-docker compose up -d
+docker compose up -d --build
 # (Docker Compose resolves dependency order via depends_on + healthchecks)
 ```
 
 ### 9.5. Environment Variables (`.env` file)
 
-```env
-# Required — InfluxDB admin token (generate a unique one)
-INFLUX_TOKEN=my-super-secret-influx-token
+All credentials are loaded from a `.env` file at the project root (gitignored). Copy `.env.example` to `.env` and edit values.
 
-# Optional — override defaults if needed
-# KAFKA_BOOTSTRAP=kafka:9092
-# REDIS_HOST=keydb
-# REDIS_PORT=6379
-# MINIO_ENDPOINT=http://minio:9000
-# MINIO_ACCESS_KEY=minioadmin
-# MINIO_SECRET_KEY=minioadmin
+```env
+# ─── InfluxDB ────────────────────────────────────────────────────────────────
+INFLUX_TOKEN=<strong-random-token>       # Required — API token for all InfluxDB access
+INFLUX_ADMIN_USER=admin                 # InfluxDB initial admin username
+INFLUX_ADMIN_PASSWORD=<change-me>       # InfluxDB initial admin password
+INFLUX_ORG=vi                           # InfluxDB organization
+INFLUX_BUCKET=crypto                    # InfluxDB bucket
+
+# ─── MinIO ───────────────────────────────────────────────────────────────────
+MINIO_ROOT_USER=minioadmin              # MinIO root username
+MINIO_ROOT_PASSWORD=<change-me>         # MinIO root password
+
+# ─── PostgreSQL ──────────────────────────────────────────────────────────────
+POSTGRES_USER=iceberg                   # Postgres user (Iceberg catalog + Dagster)
+POSTGRES_PASSWORD=<change-me>           # Postgres password
+POSTGRES_DB=iceberg_catalog             # Default database
+
+# ─── Redis ───────────────────────────────────────────────────────────────────
+REDIS_HOST=localhost                    # Only needed for local dev outside Docker
+REDIS_PORT=6379
 ```
+
+> **Note**: `INFLUX_TOKEN` is the only strictly required secret (FastAPI will refuse to start without it). All other variables have working defaults in `.env.example` but should be changed in production.
 
 ### 9.6. Resource Requirements
 
@@ -1493,21 +1394,21 @@ INFLUX_TOKEN=my-super-secret-influx-token
 
 ### 11.1. Service Access Credentials (Local Docker)
 
-| Service            | URL                                | Credentials                                                  |
-| ------------------ | ---------------------------------- | ------------------------------------------------------------ |
-| Kafka              | `localhost:9092`                   | No auth                                                      |
-| MinIO Console      | `http://localhost:9001`            | `minioadmin` / `minioadmin`                                  |
-| MinIO API          | `http://localhost:9000`            | `minioadmin` / `minioadmin`                                  |
-| InfluxDB           | `http://localhost:8086`            | `admin` / `adminpass123` (org: `vi`, bucket: `crypto`)       |
-| PostgreSQL         | `localhost:5432`                   | `iceberg` / `iceberg123` (DBs: `iceberg_catalog`, `dagster`) |
-| KeyDB              | `localhost:6379`                   | No auth                                                      |
-| Flink UI           | `http://localhost:8081`            | No auth                                                      |
-| Spark Master UI    | `http://localhost:8082`            | No auth                                                      |
-| Spark History      | `http://localhost:18080`           | No auth                                                      |
-| Trino UI           | `http://localhost:8083`            | No auth                                                      |
-| Dagster UI         | `http://localhost:3000`            | No auth                                                      |
-| **Web UI (Nginx)** | **`http://localhost:80`**          | **No auth**                                                  |
-| **FastAPI Docs**   | **`http://localhost:80/api/docs`** | **No auth**                                                  |
+| Service            | URL                                | Credentials                                                   |
+| ------------------ | ---------------------------------- | ------------------------------------------------------------- |
+| Kafka              | `localhost:9092`                   | No auth                                                       |
+| MinIO Console      | `http://localhost:9001`            | `$MINIO_ROOT_USER` / `$MINIO_ROOT_PASSWORD` (from `.env`)     |
+| MinIO API          | `http://localhost:9000`            | `$MINIO_ROOT_USER` / `$MINIO_ROOT_PASSWORD` (from `.env`)     |
+| InfluxDB           | `http://localhost:8086`            | `$INFLUX_ADMIN_USER` / `$INFLUX_ADMIN_PASSWORD` (from `.env`) |
+| PostgreSQL         | `localhost:5432`                   | `$POSTGRES_USER` / `$POSTGRES_PASSWORD` (from `.env`)         |
+| KeyDB              | `localhost:6379`                   | No auth                                                       |
+| Flink UI           | `http://localhost:8081`            | No auth                                                       |
+| Spark Master UI    | `http://localhost:8082`            | No auth                                                       |
+| Spark History      | `http://localhost:18080`           | No auth                                                       |
+| Trino UI           | `http://localhost:8083`            | No auth                                                       |
+| Dagster UI         | `http://localhost:3000`            | No auth                                                       |
+| **Web UI (Nginx)** | **`http://localhost:80`**          | **No auth**                                                   |
+| **FastAPI Docs**   | **`http://localhost:80/api/docs`** | **No auth**                                                   |
 
 ### 11.2. Useful Diagnostic Commands
 
@@ -1538,8 +1439,11 @@ curl http://localhost:8081/jobs/overview
 # View Spark events
 docker exec spark-master ls -la /opt/spark-events/
 
-# FastAPI docs (after serving layer is built)
+# FastAPI health + API docs
+curl http://localhost/api/health
 curl http://localhost/api/docs
+curl http://localhost/api/symbols
+curl http://localhost/api/ticker/BTCUSDT
 ```
 
 ### 11.3. Iceberg Table Schemas (Spark SQL)
@@ -1648,20 +1552,22 @@ PARTITIONED BY (symbol, years(event_time));
 
 ### 11.6. Frontend Feature Matrix
 
-| Feature              | Component               | Data Source                           | Status                          |
-| -------------------- | ----------------------- | ------------------------------------- | ------------------------------- |
-| Candlestick Chart    | `CandlestickChart.js`   | `marketDataService.fetchCandles()`    | Ready (mock → API toggle)       |
-| Live Price Updates   | `useCandlestickData.js` | `marketDataService.subscribeCandle()` | Ready (mock → WebSocket toggle) |
-| Order Book           | `OrderBook.js`          | Mock `generateOrderBook()`            | Needs API integration           |
-| Recent Trades        | `RecentTrades.js`       | Mock `generateRecentTrades()`         | Needs API integration           |
-| Market Overview      | `OverviewChart.js`      | Derived from candle data              | Works with API data             |
-| Technical Indicators | `CandlestickChart.js`   | Client-side calculation               | Works (SMA/EMA/RSI/MFI)         |
-| Drawing Tools        | `ChartOverlay.js`       | Client-side state                     | No backend needed               |
-| Symbol Selector      | `MarketSelector.js`     | Hardcoded `SYMBOL_META`               | Needs API + symbol alignment    |
-| Watchlist            | `App.js`                | Hardcoded `watchlistItems`            | Needs API integration           |
-| Auth                 | `AuthContext.js`        | localStorage (insecure)               | Needs FastAPI JWT backend       |
-| i18n                 | `i18n/`                 | Static translations (EN/VI)           | No changes needed               |
+| Feature              | Component               | Data Source                              | Status     |
+| -------------------- | ----------------------- | ---------------------------------------- | ---------- |
+| Candlestick Chart    | `CandlestickChart.js`   | `GET /api/klines` (InfluxDB/KeyDB)       | Integrated |
+| Live Price Updates   | `useCandlestickData.js` | `WS /api/stream` (WebSocket)             | Integrated |
+| Historical Candles   | `CandlestickChart.js`   | `GET /api/klines/historical` (Trino)     | Integrated |
+| Order Book           | `OrderBook.js`          | `GET /api/orderbook/{sym}` (KeyDB)       | Integrated |
+| Recent Trades        | `RecentTrades.js`       | `GET /api/trades/{sym}` (KeyDB)          | Integrated |
+| Market Overview      | `OverviewChart.js`      | Derived from candle data                 | Integrated |
+| Technical Indicators | `CandlestickChart.js`   | Client-side: SMA, EMA, RSI, MFI          | Integrated |
+| Drawing Tools        | `ChartOverlay.js`       | Client-side state (trendline, fib, wave) | Integrated |
+| Symbol Selector      | `MarketSelector.js`     | `GET /api/symbols` (dynamic)             | Integrated |
+| Watchlist            | `Watchlist.js`          | `GET /api/ticker` (live, 5s refresh)     | Integrated |
+| Error Boundary       | `ErrorBoundary.js`      | Global render-error catch, retry         | Integrated |
+| Connection Errors    | `App.js`                | Banner + retry when API unreachable      | Integrated |
+| i18n (EN/VI)         | `i18n/`                 | Static translations                      | Integrated |
 
 ---
 
-_This documentation was generated to guide the integration of the serving layer into the existing Lambda Architecture platform. The backend data pipeline is fully implemented and operational. The primary remaining work is building the FastAPI bridge and connecting the React dashboard to live data sources._
+_This documentation describes the complete Lambda Architecture platform, including all pipeline components and the fully integrated serving layer (FastAPI + Nginx + React)._

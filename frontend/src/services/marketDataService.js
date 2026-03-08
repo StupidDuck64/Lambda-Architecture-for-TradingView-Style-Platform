@@ -206,3 +206,163 @@ export async function fetchSymbols() {
     { symbol: "LTCUSDT", name: "Litecoin / USDT", type: "crypto" },
   ];
 }
+
+// ─── Historical Candles (Iceberg via Trino) ───────────────────────
+
+/**
+ * Fetch historical hourly candles from Iceberg cold storage.
+ *
+ * @param {string} symbol      e.g. 'BTCUSDT'
+ * @param {number} startMs     range start in epoch milliseconds
+ * @param {number} endMs       range end in epoch milliseconds
+ * @param {number} [limit=500] max candles to return
+ * @returns {Promise<Array>}   array of { time, open, high, low, close, volume }
+ */
+export async function fetchHistoricalCandles(
+  symbol,
+  startMs,
+  endMs,
+  limit = 500,
+) {
+  if (DATA_SOURCE === "api") {
+    const params = new URLSearchParams({
+      symbol,
+      startTime: String(startMs),
+      endTime: String(endMs),
+      limit: String(limit),
+    });
+    const res = await fetch(`${API_BASE_URL}/klines/historical?${params}`);
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+    const raw = await res.json();
+    return raw.map((k) => ({
+      time: Math.floor(k.openTime / 1000),
+      open: parseFloat(k.open),
+      high: parseFloat(k.high),
+      low: parseFloat(k.low),
+      close: parseFloat(k.close),
+      volume: parseFloat(k.volume),
+    }));
+  }
+
+  // Mock: generate hourly candles for the date range
+  const hourMs = 3600 * 1000;
+  const count = Math.min(Math.floor((endMs - startMs) / hourMs), limit);
+  return new Promise((resolve) => {
+    setTimeout(
+      () => resolve(generateMockCandles(symbol, "1h", Math.max(count, 10))),
+      300,
+    );
+  });
+}
+
+// ─── Order Book ───────────────────────────────────────────────────
+
+function generateMockOrderBook(basePrice, depth = 20) {
+  const asks = [];
+  const bids = [];
+  let seed = Math.floor(basePrice * 100);
+  function rand() {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  }
+  for (let i = 0; i < depth; i++) {
+    const askP = +(
+      basePrice *
+      (1 + (i + 1) * 0.0005 + rand() * 0.0003)
+    ).toFixed(2);
+    const bidP = +(
+      basePrice *
+      (1 - (i + 1) * 0.0005 - rand() * 0.0003)
+    ).toFixed(2);
+    asks.push([askP, +(rand() * 5 + 0.1).toFixed(4)]);
+    bids.push([bidP, +(rand() * 5 + 0.1).toFixed(4)]);
+  }
+  asks.sort((a, b) => a[0] - b[0]);
+  bids.sort((a, b) => b[0] - a[0]);
+  return {
+    bids,
+    asks,
+    spread: +(asks[0][0] - bids[0][0]).toFixed(2),
+    best_bid: bids[0][0],
+    best_ask: asks[0][0],
+  };
+}
+
+/**
+ * Fetch order book for a symbol.
+ * Backend returns { bids: [[price, qty], ...], asks: [[price, qty], ...], spread, best_bid, best_ask }
+ */
+export async function fetchOrderBook(symbol) {
+  if (DATA_SOURCE === "api") {
+    const res = await fetch(
+      `${API_BASE_URL}/orderbook/${encodeURIComponent(symbol)}`,
+    );
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+    return res.json();
+  }
+  return generateMockOrderBook(symbol === "BTCUSDT" ? 64000 : 100);
+}
+
+// ─── Recent Trades ────────────────────────────────────────────────
+
+function generateMockTrades(basePrice, count = 50) {
+  const trades = [];
+  let seed = Math.floor(basePrice * 37);
+  function rand() {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  let price = basePrice;
+  for (let i = 0; i < count; i++) {
+    const side = rand() > 0.5 ? "buy" : "sell";
+    price = Math.max(price + (rand() - 0.5) * basePrice * 0.002, 1);
+    trades.push({
+      time: (now - (count - i) * (Math.floor(rand() * 30) + 5)) * 1000,
+      price: +price.toFixed(2),
+      volume: +(rand() * 3 + 0.001).toFixed(4),
+      side,
+    });
+  }
+  return trades.reverse();
+}
+
+/**
+ * Fetch recent trades / price ticks.
+ * Backend returns [{ time (ms), price, volume, side }]
+ */
+export async function fetchTrades(symbol, limit = 50) {
+  if (DATA_SOURCE === "api") {
+    const res = await fetch(
+      `${API_BASE_URL}/trades/${encodeURIComponent(symbol)}?limit=${limit}`,
+    );
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+    return res.json();
+  }
+  return generateMockTrades(symbol === "BTCUSDT" ? 64000 : 100, limit);
+}
+
+// ─── Tickers ──────────────────────────────────────────────────────
+
+/**
+ * Fetch all live tickers.
+ * Backend returns [{ symbol, price, bid, ask, volume, event_time }]
+ */
+export async function fetchTickers() {
+  if (DATA_SOURCE === "api") {
+    const res = await fetch(`${API_BASE_URL}/ticker`);
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+    return res.json();
+  }
+  // Mock fallback — return static prices
+  return [
+    { symbol: "BTCUSDT", price: 64444, change24h: 0.33 },
+    { symbol: "ETHUSDT", price: 3400, change24h: -0.53 },
+    { symbol: "BNBUSDT", price: 580, change24h: -0.27 },
+    { symbol: "SOLUSDT", price: 165, change24h: 0.54 },
+    { symbol: "XRPUSDT", price: 2.35, change24h: -0.16 },
+    { symbol: "DOGEUSDT", price: 0.158, change24h: -0.6 },
+    { symbol: "ADAUSDT", price: 0.72, change24h: -0.83 },
+    { symbol: "AVAXUSDT", price: 35.2, change24h: 0.33 },
+  ];
+}

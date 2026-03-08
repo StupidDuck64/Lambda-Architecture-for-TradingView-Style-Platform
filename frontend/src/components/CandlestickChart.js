@@ -7,479 +7,33 @@ import {
   HistogramSeries,
   LineSeries,
 } from "lightweight-charts";
-import {
-  Settings,
-  ChevronDown,
-  ChevronUp,
-  Download,
-  BarChart3,
-  BookOpen,
-  ArrowLeftRight,
-  Eye,
-} from "lucide-react";
+import { Settings, Download } from "lucide-react";
 import { useI18n } from "../i18n";
-import { fetchCandles } from "../services/marketDataService";
+import {
+  fetchCandles,
+  fetchHistoricalCandles,
+} from "../services/marketDataService";
 import MarketSelector from "./MarketSelector";
+import DateRangePicker from "./DateRangePicker";
 import OverviewChart from "./OverviewChart";
 import OrderBook from "./OrderBook";
 import RecentTrades from "./RecentTrades";
-
-const THEME = {
-  background: "#1a1d26",
-  textColor: "#9ca3af",
-  gridColor: "#2d2f3e",
-  borderColor: "#374151",
-  upColor: "#26a69a",
-  downColor: "#ef5350",
-  volumeUp: "rgba(38,166,154,0.35)",
-  volumeDown: "rgba(239,83,80,0.35)",
-  sma20: "#f59e0b",
-  sma50: "#8b5cf6",
-  ema: "#06b6d4",
-  rsi: "#a78bfa",
-  mfi: "#34d399",
-  crosshair: "#6b7280",
-};
-
-// ─── Math helpers ─────────────────────────────────────────────────
-const SYMBOLS = [
-  "BTCUSDT",
-  "ETHUSDT",
-  "BNBUSDT",
-  "SOLUSDT",
-  "XRPUSDT",
-  "DOGEUSDT",
-  "ADAUSDT",
-  "AVAXUSDT",
-  "DOTUSDT",
-  "LINKUSDT",
-  "MATICUSDT",
-  "LTCUSDT",
-];
-const TIMEFRAMES = ["1s", "1m", "5m", "15m", "1H", "4H", "1D", "1W"];
-const CHART_TABS = ["candlestick", "overview", "orderBook", "recentTrades"];
-const TAB_ICONS = {
-  candlestick: BarChart3,
-  overview: Eye,
-  orderBook: BookOpen,
-  recentTrades: ArrowLeftRight,
-};
-
-function calcSMA(candles, period) {
-  const out = [];
-  for (let i = period - 1; i < candles.length; i++) {
-    const avg =
-      candles.slice(i - period + 1, i + 1).reduce((s, c) => s + c.close, 0) /
-      period;
-    out.push({ time: candles[i].time, value: +avg.toFixed(4) });
-  }
-  return out;
-}
-
-function calcEMA(candles, period) {
-  const k = 2 / (period + 1);
-  const out = [];
-  let ema = candles.slice(0, period).reduce((s, c) => s + c.close, 0) / period;
-  out.push({ time: candles[period - 1].time, value: +ema.toFixed(4) });
-  for (let i = period; i < candles.length; i++) {
-    ema = candles[i].close * k + ema * (1 - k);
-    out.push({ time: candles[i].time, value: +ema.toFixed(4) });
-  }
-  return out;
-}
-
-function calcRSI(candles, period) {
-  const out = [];
-  if (candles.length < period + 1) return out;
-  let gains = 0,
-    losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const diff = candles[i].close - candles[i - 1].close;
-    if (diff > 0) gains += diff;
-    else losses -= diff;
-  }
-  let avgGain = gains / period,
-    avgLoss = losses / period;
-  const rsi = (v) => (avgLoss === 0 ? 100 : 100 - 100 / (1 + v));
-  out.push({
-    time: candles[period].time,
-    value: +rsi(avgGain / avgLoss).toFixed(2),
-  });
-  for (let i = period + 1; i < candles.length; i++) {
-    const diff = candles[i].close - candles[i - 1].close;
-    const g = diff > 0 ? diff : 0;
-    const l = diff < 0 ? -diff : 0;
-    avgGain = (avgGain * (period - 1) + g) / period;
-    avgLoss = (avgLoss * (period - 1) + l) / period;
-    out.push({
-      time: candles[i].time,
-      value: +rsi(avgGain / (avgLoss || 1e-10)).toFixed(2),
-    });
-  }
-  return out;
-}
-
-function calcMFI(candles, period) {
-  const out = [];
-  const typicals = candles.map((c) => ({
-    time: c.time,
-    tp: (c.high + c.low + c.close) / 3,
-    vol: c.volume,
-  }));
-  for (let i = period; i < typicals.length; i++) {
-    let posFlow = 0,
-      negFlow = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      const mf = typicals[j].tp * typicals[j].vol;
-      if (typicals[j].tp >= typicals[j - 1].tp) posFlow += mf;
-      else negFlow += mf;
-    }
-    const ratio = negFlow === 0 ? 100 : 100 - 100 / (1 + posFlow / negFlow);
-    out.push({ time: typicals[i].time, value: +ratio.toFixed(2) });
-  }
-  return out;
-}
-
-// ─── Indicator settings defaults ─────────────────────────────────
-const DEFAULT_INDICATOR_SETTINGS = {
-  sma20: {
-    period: 20,
-    color: THEME.sma20,
-    lineWidth: 1,
-    visible: true,
-    type: "SMA",
-  },
-  sma50: {
-    period: 50,
-    color: THEME.sma50,
-    lineWidth: 1,
-    visible: true,
-    type: "SMA",
-  },
-  ema: {
-    period: 20,
-    color: THEME.ema,
-    lineWidth: 1.5,
-    visible: false,
-    type: "EMA",
-  },
-  volume: {
-    visible: true,
-    upColor: THEME.volumeUp,
-    downColor: THEME.volumeDown,
-  },
-  rsi: {
-    period: 14,
-    overbought: 70,
-    oversold: 30,
-    color: THEME.rsi,
-    visible: false,
-  },
-  mfi: {
-    period: 14,
-    overbought: 80,
-    oversold: 20,
-    color: THEME.mfi,
-    visible: false,
-  },
-};
-
-// ─── Indicator Settings Panel ─────────────────────────────────────
-const IndicatorPanel = ({ indSettings, onChange }) => {
-  const { t } = useI18n();
-  const [expanded, setExpanded] = useState(null);
-
-  const indicators = [
-    { key: "volume", label: "Volume" },
-    { key: "sma20", label: "SMA 20" },
-    { key: "sma50", label: "SMA 50" },
-    { key: "ema", label: "EMA" },
-    { key: "rsi", label: "RSI" },
-    { key: "mfi", label: "MFI" },
-  ];
-
-  const set = (key, field, value) => {
-    onChange({
-      ...indSettings,
-      [key]: { ...indSettings[key], [field]: value },
-    });
-  };
-
-  const toggleVisible = (key) => set(key, "visible", !indSettings[key].visible);
-
-  return (
-    <div className="mt-1 w-56 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl overflow-hidden">
-      <div className="px-3 py-2 bg-gray-750 border-b border-gray-700 text-xs font-semibold text-gray-300 flex items-center gap-1">
-        <Settings size={11} /> {t("technicalIndicators")}
-      </div>
-      {indicators.map(({ key, label }) => {
-        const cfg = indSettings[key] || {};
-        const isOpen = expanded === key;
-        return (
-          <div key={key} className="border-b border-gray-700 last:border-0">
-            <div
-              className="flex items-center justify-between px-3 py-1.5 hover:bg-gray-700 cursor-pointer"
-              onClick={() => setExpanded(isOpen ? null : key)}
-            >
-              <div className="flex items-center gap-2">
-                {/* Color dot */}
-                {cfg.color && (
-                  <span
-                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: cfg.color }}
-                  />
-                )}
-                <span className="text-xs text-gray-300">{label}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {/* Toggle visible */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleVisible(key);
-                  }}
-                  className={`w-8 h-4 rounded-full transition-colors ${cfg.visible ? "bg-blue-600" : "bg-gray-600"}`}
-                >
-                  <span
-                    className={`block w-3 h-3 rounded-full bg-white shadow mx-0.5 transition-transform ${cfg.visible ? "translate-x-4" : "translate-x-0"}`}
-                  />
-                </button>
-                {isOpen ? (
-                  <ChevronUp size={12} className="text-gray-400" />
-                ) : (
-                  <ChevronDown size={12} className="text-gray-400" />
-                )}
-              </div>
-            </div>
-            {/* Settings rows */}
-            {isOpen && (
-              <div className="px-3 pb-2 space-y-1.5 bg-gray-900">
-                {cfg.period !== undefined && (
-                  <div className="flex items-center justify-between gap-2 mt-1.5">
-                    <span className="text-xs text-gray-400">{t("period")}</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="500"
-                      value={cfg.period}
-                      onChange={(e) =>
-                        set(
-                          key,
-                          "period",
-                          parseInt(e.target.value) || cfg.period,
-                        )
-                      }
-                      className="w-16 bg-gray-700 text-white text-xs rounded px-2 py-0.5 border border-gray-600 focus:outline-none"
-                    />
-                  </div>
-                )}
-                {cfg.color !== undefined && (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-gray-400">{t("color")}</span>
-                    <input
-                      type="color"
-                      value={cfg.color}
-                      onChange={(e) => set(key, "color", e.target.value)}
-                      className="w-8 h-5 rounded cursor-pointer border-0 bg-transparent"
-                    />
-                  </div>
-                )}
-                {cfg.lineWidth !== undefined && (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-gray-400">
-                      {t("thickness")}
-                    </span>
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="4"
-                      step="0.5"
-                      value={cfg.lineWidth}
-                      onChange={(e) =>
-                        set(key, "lineWidth", parseFloat(e.target.value))
-                      }
-                      className="w-20 accent-blue-500"
-                    />
-                    <span className="text-xs text-gray-300 w-4">
-                      {cfg.lineWidth}
-                    </span>
-                  </div>
-                )}
-                {cfg.overbought !== undefined && (
-                  <>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-gray-400">
-                        {t("overbought")}
-                      </span>
-                      <input
-                        type="number"
-                        min="50"
-                        max="100"
-                        value={cfg.overbought}
-                        onChange={(e) =>
-                          set(key, "overbought", parseInt(e.target.value))
-                        }
-                        className="w-16 bg-gray-700 text-white text-xs rounded px-2 py-0.5 border border-gray-600 focus:outline-none"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-gray-400">
-                        {t("oversold")}
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="50"
-                        value={cfg.oversold}
-                        onChange={(e) =>
-                          set(key, "oversold", parseInt(e.target.value))
-                        }
-                        className="w-16 bg-gray-700 text-white text-xs rounded px-2 py-0.5 border border-gray-600 focus:outline-none"
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-// ─── Sub-chart pane (RSI / MFI) ───────────────────────────────────
-const OscillatorPane = ({ data, settings, label }) => {
-  const ref = useRef(null);
-  const chartRef = useRef(null);
-
-  useEffect(() => {
-    if (!ref.current || !data || data.length === 0) return;
-    const chart = createChart(ref.current, {
-      layout: {
-        background: { color: "#141620" },
-        textColor: THEME.textColor,
-        fontSize: 10,
-      },
-      grid: {
-        vertLines: { color: THEME.gridColor },
-        horzLines: { color: THEME.gridColor },
-      },
-      crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: {
-        borderColor: THEME.borderColor,
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        borderColor: THEME.borderColor,
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      handleScroll: false,
-      handleScale: false,
-    });
-    const series = chart.addSeries(LineSeries, {
-      color: settings.color,
-      lineWidth: settings.lineWidth || 1.5,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: true,
-    });
-    series.setData(data);
-
-    // Overbought / Oversold bands
-    if (settings.overbought != null) {
-      series.createPriceLine({
-        price: settings.overbought,
-        color: "#ef444460",
-        lineStyle: LineStyle.Dashed,
-        lineWidth: 1,
-        title: "OB",
-        axisLabelVisible: true,
-      });
-      series.createPriceLine({
-        price: settings.oversold,
-        color: "#22c55e60",
-        lineStyle: LineStyle.Dashed,
-        lineWidth: 1,
-        title: "OS",
-        axisLabelVisible: true,
-      });
-    }
-
-    chart.timeScale().fitContent();
-    chartRef.current = chart;
-    const ro = new ResizeObserver(() => {
-      if (ref.current)
-        chart.resize(ref.current.clientWidth, ref.current.clientHeight);
-    });
-    ro.observe(ref.current);
-    return () => {
-      ro.disconnect();
-      chart.remove();
-      chartRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Update data
-  useEffect(() => {
-    if (!chartRef.current || !data || data.length === 0) return;
-    // Re-create series on settings change is handled by unmount/remount via key
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, settings]);
-
-  return (
-    <div className="relative border-t border-gray-700" style={{ height: 100 }}>
-      <span className="absolute top-1 left-2 text-xs text-gray-400 z-10 pointer-events-none">
-        {label}
-      </span>
-      <div ref={ref} className="w-full h-full" />
-    </div>
-  );
-};
-
-const OHLCVBar = ({ data }) => {
-  if (!data) return null;
-  const isUp = data.close >= data.open;
-  const clr = isUp ? THEME.upColor : THEME.downColor;
-  const f = (v) =>
-    v != null
-      ? v.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })
-      : "-";
-  return (
-    <div className="flex items-center gap-4 text-xs font-mono select-none flex-wrap">
-      {data.timeLabel && (
-        <span className="text-gray-400">{data.timeLabel}</span>
-      )}
-      <span>
-        O <span style={{ color: clr }}>{f(data.open)}</span>
-      </span>
-      <span>
-        H <span style={{ color: clr }}>{f(data.high)}</span>
-      </span>
-      <span>
-        L <span style={{ color: clr }}>{f(data.low)}</span>
-      </span>
-      <span>
-        C <span style={{ color: clr }}>{f(data.close)}</span>
-      </span>
-      {data.volume != null && (
-        <span>
-          V{" "}
-          <span className="text-gray-400">{data.volume.toLocaleString()}</span>
-        </span>
-      )}
-    </div>
-  );
-};
+import {
+  THEME,
+  TIMEFRAMES,
+  CHART_TABS,
+  TAB_ICONS,
+  DEFAULT_INDICATOR_SETTINGS,
+} from "./chart/chartConstants";
+import { calcSMA, calcEMA, calcRSI, calcMFI } from "./chart/indicatorUtils";
+import IndicatorPanel from "./chart/IndicatorPanel";
+import OscillatorPane from "./chart/OscillatorPane";
+import OHLCVBar from "./chart/OHLCVBar";
 
 const CandlestickChart = ({
   defaultSymbol = "BTCUSDT",
   symbol: symbolProp,
+  symbols = [],
   children,
   starredSymbols = [],
   onToggleStar,
@@ -504,6 +58,9 @@ const CandlestickChart = ({
   const [activeTab, setActiveTab] = useState("candlestick");
   const [candles, setCandles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [historicalRange, setHistoricalRange] = useState(null); // { startMs, endMs } or null
 
   const handleSymbolChange = useCallback(
     (s) => {
@@ -634,37 +191,72 @@ const CandlestickChart = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load data when symbol or timeframe changes
+  // Helper: push OHLCV data into chart series + indicators
+  const applyDataToChart = useCallback(
+    (data) => {
+      if (!candleRef.current) return;
+      setCandles(data);
+      candleRef.current.setData(data);
+      const vs = volumeRef.current;
+      if (vs)
+        vs.setData(
+          data.map((c) => ({
+            time: c.time,
+            value: c.volume,
+            color: c.close >= c.open ? THEME.volumeUp : THEME.volumeDown,
+          })),
+        );
+      if (sma20Ref.current)
+        sma20Ref.current.setData(calcSMA(data, indSettings.sma20.period));
+      if (sma50Ref.current)
+        sma50Ref.current.setData(calcSMA(data, indSettings.sma50.period));
+      if (emaRef.current)
+        emaRef.current.setData(calcEMA(data, indSettings.ema.period));
+      if (chartRef.current) chartRef.current.timeScale().fitContent();
+      if (data.length > 0)
+        setTooltip({ ...data[data.length - 1], timeLabel: "" });
+    },
+    [indSettings],
+  );
+
+  // Load data when symbol or timeframe changes (live mode)
   useEffect(() => {
-    if (!candleRef.current) return;
+    if (!candleRef.current || historicalRange) return;
     setIsLoading(true);
+    setFetchError(null);
     fetchCandles(symbol, timeframe.toLowerCase(), 120)
       .then((data) => {
-        if (!candleRef.current) return;
-        setCandles(data);
-        candleRef.current.setData(data);
-        const vs = volumeRef.current;
-        if (vs)
-          vs.setData(
-            data.map((c) => ({
-              time: c.time,
-              value: c.volume,
-              color: c.close >= c.open ? THEME.volumeUp : THEME.volumeDown,
-            })),
-          );
-        if (sma20Ref.current)
-          sma20Ref.current.setData(calcSMA(data, indSettings.sma20.period));
-        if (sma50Ref.current)
-          sma50Ref.current.setData(calcSMA(data, indSettings.sma50.period));
-        if (emaRef.current)
-          emaRef.current.setData(calcEMA(data, indSettings.ema.period));
-        if (chartRef.current) chartRef.current.timeScale().fitContent();
-        setTooltip({ ...data[data.length - 1], timeLabel: "" });
+        applyDataToChart(data);
         setIsLoading(false);
       })
-      .catch(() => setIsLoading(false));
+      .catch(() => {
+        setIsLoading(false);
+        setFetchError("Failed to load candle data");
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, timeframe]);
+  }, [symbol, timeframe, historicalRange, retryCount]);
+
+  // Load historical data from Iceberg when date range is set
+  useEffect(() => {
+    if (!candleRef.current || !historicalRange) return;
+    setIsLoading(true);
+    setFetchError(null);
+    fetchHistoricalCandles(
+      symbol,
+      historicalRange.startMs,
+      historicalRange.endMs,
+      2000,
+    )
+      .then((data) => {
+        applyDataToChart(data);
+        setIsLoading(false);
+      })
+      .catch(() => {
+        setIsLoading(false);
+        setFetchError("Failed to load historical data");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, historicalRange, retryCount]);
 
   // Re-layout chart when candlestick tab becomes visible again
   useEffect(() => {
@@ -762,7 +354,7 @@ const CandlestickChart = ({
       <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <MarketSelector
-            symbols={SYMBOLS}
+            symbols={symbols}
             selectedSymbol={symbol}
             onSelect={handleSymbolChange}
             starredSymbols={starredSymbols}
@@ -789,9 +381,13 @@ const CandlestickChart = ({
           )}
         </div>
         <div className="flex items-center gap-1">
-          {TIMEFRAMES.map((tf) => (
-            <TFBtn key={tf} tf={tf} />
-          ))}
+          {historicalRange ? (
+            <span className="text-xs text-amber-400 font-medium px-2">
+              1H (historical)
+            </span>
+          ) : (
+            TIMEFRAMES.map((tf) => <TFBtn key={tf} tf={tf} />)
+          )}
         </div>
         <div className="flex items-center gap-2">
           {/* Export button */}
@@ -820,8 +416,31 @@ const CandlestickChart = ({
               </div>
             )}
           </div>
+          {/* Historical date-range picker */}
+          <DateRangePicker
+            active={!!historicalRange}
+            onApply={(range) => setHistoricalRange(range)}
+            onClear={() => setHistoricalRange(null)}
+          />
         </div>
       </div>
+
+      {/* Historical mode banner */}
+      {historicalRange && (
+        <div className="flex items-center justify-between px-3 py-1.5 bg-amber-900/40 border-b border-amber-700/50">
+          <span className="text-xs text-amber-300">
+            Viewing historical data (Iceberg) &mdash;{" "}
+            {new Date(historicalRange.startMs).toLocaleString()} to{" "}
+            {new Date(historicalRange.endMs).toLocaleString()} (hourly candles)
+          </span>
+          <button
+            onClick={() => setHistoricalRange(null)}
+            className="text-xs text-amber-400 hover:text-white underline"
+          >
+            Back to live
+          </button>
+        </div>
+      )}
 
       {/* Chart tabs */}
       <div className="flex items-center gap-0.5 px-3 py-1 bg-gray-800 border-b border-gray-700">
@@ -863,6 +482,22 @@ const CandlestickChart = ({
               </span>
             </div>
           )}
+          {fetchError && !isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-60 z-10">
+              <div className="text-center">
+                <p className="text-red-400 text-sm mb-2">{fetchError}</p>
+                <button
+                  onClick={() => {
+                    setFetchError(null);
+                    setRetryCount((c) => c + 1);
+                  }}
+                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
           {children}
         </div>
         {/* Oscillator panes */}
@@ -892,24 +527,17 @@ const CandlestickChart = ({
 
       {activeTab === "orderBook" && (
         <div className="flex-1 min-h-0">
-          <OrderBook
-            symbol={symbol}
-            lastPrice={lastCandle ? lastCandle.close : 100}
-          />
+          <OrderBook symbol={symbol} />
         </div>
       )}
 
       {activeTab === "recentTrades" && (
         <div className="flex-1 min-h-0">
-          <RecentTrades
-            symbol={symbol}
-            lastPrice={lastCandle ? lastCandle.close : 100}
-          />
+          <RecentTrades symbol={symbol} />
         </div>
       )}
     </div>
   );
 };
 
-export { SYMBOLS };
 export default CandlestickChart;

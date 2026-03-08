@@ -4,16 +4,16 @@ import "./index.css";
 import App from "./App";
 import reportWebVitals from "./reportWebVitals";
 import { I18nProvider } from "./i18n";
-import { AuthProvider } from "./contexts/AuthContext";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <React.StrictMode>
-    <I18nProvider>
-      <AuthProvider>
+    <ErrorBoundary>
+      <I18nProvider>
         <App />
-      </AuthProvider>
-    </I18nProvider>
+      </I18nProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );
 

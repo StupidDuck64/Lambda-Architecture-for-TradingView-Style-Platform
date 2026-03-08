@@ -15,8 +15,8 @@ from pyflink.table import StreamTableEnvironment
 
 KAFKA_BOOTSTRAP  = os.environ.get("KAFKA_BOOTSTRAP",   "kafka:9092")
 MINIO_ENDPOINT   = os.environ.get("MINIO_ENDPOINT",    "http://minio:9000")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY",  "minioadmin")
-MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY",  "minioadmin")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY",  "")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY",  "")
 REDIS_HOST       = os.environ.get("REDIS_HOST",        "keydb")
 REDIS_PORT       = int(os.environ.get("REDIS_PORT",    "6379"))
 
@@ -62,6 +62,7 @@ class KeyDBWriter(FlatMapFunction):
             event_time = int(value.get("event_time", 0))
             price      = float(value.get("close", 0))
             volume     = float(value.get("h24_volume", 0))
+            change_pct = float(value.get("h24_price_change_pct", 0))
             cutoff     = event_time - 300_000
             pipe = self._r.pipeline()
             pipe.hset(
@@ -71,6 +72,7 @@ class KeyDBWriter(FlatMapFunction):
                     "bid":        float(value.get("bid", 0)),
                     "ask":        float(value.get("ask", 0)),
                     "volume":     volume,
+                    "change24h":  change_pct,
                     "event_time": event_time,
                 },
             )

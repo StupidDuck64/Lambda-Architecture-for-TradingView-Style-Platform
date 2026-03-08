@@ -1,64 +1,86 @@
-import React, { useMemo } from 'react';
-import { useI18n } from '../i18n';
+import React, { useState, useEffect, useRef } from "react";
+import { useI18n } from "../i18n";
+import { fetchOrderBook } from "../services/marketDataService";
 
-function generateOrderBook(basePrice, depth = 20) {
-  const asks = [];
-  const bids = [];
-  let seed = Math.floor(basePrice * 100);
-  function rand() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
-
-  for (let i = 0; i < depth; i++) {
-    const askPrice = basePrice * (1 + (i + 1) * 0.0005 + rand() * 0.0003);
-    const bidPrice = basePrice * (1 - (i + 1) * 0.0005 - rand() * 0.0003);
-    const askAmt = +(rand() * 5 + 0.1).toFixed(4);
-    const bidAmt = +(rand() * 5 + 0.1).toFixed(4);
-    asks.push({ price: +askPrice.toFixed(2), amount: askAmt, total: 0 });
-    bids.push({ price: +bidPrice.toFixed(2), amount: bidAmt, total: 0 });
-  }
-
-  // Sort asks ascending, bids descending
-  asks.sort((a, b) => a.price - b.price);
-  bids.sort((a, b) => b.price - a.price);
-
-  // Calculate running totals
-  let runAsk = 0;
-  asks.forEach((a) => { runAsk += a.amount; a.total = +runAsk.toFixed(4); });
-  let runBid = 0;
-  bids.forEach((b) => { runBid += b.amount; b.total = +runBid.toFixed(4); });
-
-  return { asks, bids };
-}
-
-const OrderBook = ({ symbol, lastPrice }) => {
+const OrderBook = ({ symbol }) => {
   const { t } = useI18n();
+  const [book, setBook] = useState({ asks: [], bids: [], spread: 0 });
+  const [error, setError] = useState(null);
+  const intervalRef = useRef(null);
 
-  const { asks, bids } = useMemo(() => generateOrderBook(lastPrice || 100), [lastPrice]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetchOrderBook(symbol)
+        .then((data) => {
+          if (cancelled) return;
+          // Backend returns bids/asks as [[price, qty], ...]
+          const parseSide = (arr) => {
+            let running = 0;
+            return (arr || []).map(([p, q]) => {
+              const price = parseFloat(p);
+              const amount = parseFloat(q);
+              running += amount;
+              return {
+                price,
+                amount: +amount.toFixed(4),
+                total: +running.toFixed(4),
+              };
+            });
+          };
+          const asks = parseSide(data.asks);
+          const bids = parseSide(data.bids);
+          setBook({ asks, bids, spread: data.spread || 0 });
+          setError(null);
+        })
+        .catch(() => {
+          setError("Failed to load order book");
+        });
+    };
+    load();
+    intervalRef.current = setInterval(load, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalRef.current);
+    };
+  }, [symbol]);
 
+  const { asks, bids, spread } = book;
   const maxAskTotal = asks.length > 0 ? asks[asks.length - 1].total : 1;
   const maxBidTotal = bids.length > 0 ? bids[bids.length - 1].total : 1;
-  const spread = asks.length > 0 && bids.length > 0
-    ? (asks[0].price - bids[0].price).toFixed(2)
-    : '0';
-  const spreadPct = asks.length > 0 && bids.length > 0
-    ? ((asks[0].price - bids[0].price) / asks[0].price * 100).toFixed(3)
-    : '0';
+  const spreadPct =
+    asks.length > 0 && bids.length > 0
+      ? (((asks[0].price - bids[0].price) / asks[0].price) * 100).toFixed(3)
+      : "0";
 
-  const f = (v) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const f = (v) =>
+    v.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
 
   return (
     <div className="h-full flex flex-col text-xs font-mono overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700">
-        <span className="text-gray-400 font-sans font-medium text-sm">{t('orderBook')}</span>
+        <span className="text-gray-400 font-sans font-medium text-sm">
+          {t("orderBook")}
+        </span>
         <span className="text-gray-500">{symbol}</span>
       </div>
 
       {/* Column headers */}
       <div className="flex px-3 py-1 text-gray-500 border-b border-gray-700 bg-gray-850">
-        <span className="flex-1">{t('price')}</span>
-        <span className="flex-1 text-right">{t('amount')}</span>
-        <span className="flex-1 text-right">{t('total')}</span>
+        <span className="flex-1">{t("price")}</span>
+        <span className="flex-1 text-right">{t("amount")}</span>
+        <span className="flex-1 text-right">{t("total")}</span>
       </div>
+
+      {error && asks.length === 0 && bids.length === 0 && (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-red-400 text-xs">{error}</p>
+        </div>
+      )}
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Asks (reversed so lowest ask is at bottom) */}
@@ -69,16 +91,22 @@ const OrderBook = ({ symbol, lastPrice }) => {
                 className="absolute right-0 top-0 bottom-0 bg-red-500 bg-opacity-10"
                 style={{ width: `${(ask.total / maxAskTotal) * 100}%` }}
               />
-              <span className="flex-1 text-red-400 relative z-10">{f(ask.price)}</span>
-              <span className="flex-1 text-right text-gray-300 relative z-10">{ask.amount}</span>
-              <span className="flex-1 text-right text-gray-500 relative z-10">{ask.total}</span>
+              <span className="flex-1 text-red-400 relative z-10">
+                {f(ask.price)}
+              </span>
+              <span className="flex-1 text-right text-gray-300 relative z-10">
+                {ask.amount}
+              </span>
+              <span className="flex-1 text-right text-gray-500 relative z-10">
+                {ask.total}
+              </span>
             </div>
           ))}
         </div>
 
         {/* Spread */}
         <div className="flex items-center justify-center gap-2 py-1.5 bg-gray-800 border-y border-gray-700">
-          <span className="text-gray-400">{t('spread')}:</span>
+          <span className="text-gray-400">{t("spread")}:</span>
           <span className="text-white font-semibold">{spread}</span>
           <span className="text-gray-500">({spreadPct}%)</span>
         </div>
@@ -91,9 +119,15 @@ const OrderBook = ({ symbol, lastPrice }) => {
                 className="absolute right-0 top-0 bottom-0 bg-green-500 bg-opacity-10"
                 style={{ width: `${(bid.total / maxBidTotal) * 100}%` }}
               />
-              <span className="flex-1 text-green-400 relative z-10">{f(bid.price)}</span>
-              <span className="flex-1 text-right text-gray-300 relative z-10">{bid.amount}</span>
-              <span className="flex-1 text-right text-gray-500 relative z-10">{bid.total}</span>
+              <span className="flex-1 text-green-400 relative z-10">
+                {f(bid.price)}
+              </span>
+              <span className="flex-1 text-right text-gray-300 relative z-10">
+                {bid.amount}
+              </span>
+              <span className="flex-1 text-right text-gray-500 relative z-10">
+                {bid.total}
+              </span>
             </div>
           ))}
         </div>

@@ -14,8 +14,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 MINIO_ENDPOINT   = os.environ.get("MINIO_ENDPOINT",   "http://minio:9000")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "")
 
 TABLES = [
     "iceberg_catalog.crypto_lakehouse.coin_ticker",
@@ -43,8 +43,8 @@ spark = (
         "spark.sql.catalog.iceberg_catalog.uri",
         f"jdbc:postgresql://{os.environ.get('POSTGRES_HOST', 'postgres')}:5432/iceberg_catalog",
     )
-    .config("spark.sql.catalog.iceberg_catalog.jdbc.user", "iceberg")
-    .config("spark.sql.catalog.iceberg_catalog.jdbc.password", "iceberg123")
+    .config("spark.sql.catalog.iceberg_catalog.jdbc.user", os.environ.get("POSTGRES_USER", ""))
+    .config("spark.sql.catalog.iceberg_catalog.jdbc.password", os.environ.get("POSTGRES_PASSWORD", ""))
     .config("spark.sql.catalog.iceberg_catalog.warehouse", "s3://cryptoprice/iceberg")
     .config(
         "spark.sql.catalog.iceberg_catalog.io-impl",

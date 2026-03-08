@@ -14,6 +14,7 @@ async def get_ticker(symbol: str):
     return {
         "symbol": symbol.upper(),
         "price": float(data.get("price", 0)),
+        "change24h": float(data.get("change24h", 0)),
         "bid": float(data.get("bid", 0)),
         "ask": float(data.get("ask", 0)),
         "volume": float(data.get("volume", 0)),
@@ -32,6 +33,7 @@ async def get_all_tickers():
             result.append({
                 "symbol": symbol,
                 "price": float(data.get("price", 0)),
+                "change24h": float(data.get("change24h", 0)),
                 "bid": float(data.get("bid", 0)),
                 "ask": float(data.get("ask", 0)),
                 "volume": float(data.get("volume", 0)),
