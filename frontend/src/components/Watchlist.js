@@ -13,10 +13,12 @@ const Watchlist = ({
 }) => {
   const { t } = useI18n();
 
-  const filteredItems =
+  const MAX_VISIBLE = 10;
+  const allFiltered =
     filter === "starred"
       ? items.filter((item) => starredSymbols.includes(item.symbol))
       : items;
+  const filteredItems = allFiltered.slice(0, MAX_VISIBLE);
 
   return (
     <aside className="w-64 bg-gray-800 p-4 rounded-lg overflow-y-auto">
@@ -95,6 +97,11 @@ const Watchlist = ({
           </li>
         )}
       </ul>
+      {allFiltered.length > MAX_VISIBLE && (
+        <p className="text-center text-gray-500 text-xs mt-2">
+          Showing {MAX_VISIBLE} of {allFiltered.length} symbols
+        </p>
+      )}
     </aside>
   );
 };

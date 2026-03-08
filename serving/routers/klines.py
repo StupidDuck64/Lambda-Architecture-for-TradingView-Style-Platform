@@ -103,7 +103,7 @@ async def get_klines(
     base_sec = INTERVAL_SECONDS[base]
     mult = max(target_sec // base_sec, 1)
     needed = limit * mult + mult  # small buffer
-    range_h = min(max(needed * base_sec // 3600 + 1, 1), 8760)
+    range_h = min(max(needed * base_sec // 3600 + 1, 1), 2160)  # cap at 90 days
 
     candles = await asyncio.to_thread(
         _query_influx_sync, symbol, base, needed, range_h,
@@ -123,14 +123,20 @@ async def get_klines(
     if not candles:
         r = await get_redis()
         # Try 1m first, then 1s
+        raw = None
         for keydb_key in (f"candle:1m:{symbol}", f"candle:1s:{symbol}"):
             raw = await r.zrangebyscore(keydb_key, "-inf", "+inf")
             if raw:
                 break
+        seen_times: set[int] = set()
         for item in raw if raw else []:
             c = json.loads(item)
+            t = int(c["t"])
+            if t in seen_times:
+                continue  # deduplicate by timestamp
+            seen_times.add(t)
             candles.append({
-                "openTime": int(c["t"]),
+                "openTime": t,
                 "open": c["o"], "high": c["h"],
                 "low": c["l"], "close": c["c"],
                 "volume": c["v"],

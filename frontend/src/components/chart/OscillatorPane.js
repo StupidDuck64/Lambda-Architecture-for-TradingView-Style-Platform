@@ -5,7 +5,7 @@ import {
   LineStyle,
   LineSeries,
 } from "lightweight-charts";
-import { THEME } from "./chartConstants";
+import { THEME, localTickMarkFormatter } from "./chartConstants";
 
 const OscillatorPane = ({ data, settings, label }) => {
   const ref = useRef(null);
@@ -32,6 +32,7 @@ const OscillatorPane = ({ data, settings, label }) => {
         borderColor: THEME.borderColor,
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: localTickMarkFormatter,
       },
       handleScroll: false,
       handleScale: false,

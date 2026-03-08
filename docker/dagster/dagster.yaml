@@ -1,9 +1,10 @@
 storage:
   postgres:
-    postgres_url: "postgresql://iceberg:iceberg123@postgres:5432/dagster"
+    postgres_url:
+      env: DAGSTER_PG_URL
 
 scheduler:
-  module: dagster._core.scheduler.daemon
+  module: dagster._core.scheduler
   class: DagsterDaemonScheduler
 
 run_coordinator:
@@ -12,3 +13,4 @@ run_coordinator:
 
 run_launcher:
   module: dagster._core.launcher.default_run_launcher
+  class: DefaultRunLauncher

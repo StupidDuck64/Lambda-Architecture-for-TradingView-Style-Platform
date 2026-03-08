@@ -1,4 +1,5 @@
 export function calcSMA(candles, period) {
+  if (!candles || candles.length < period) return [];
   const out = [];
   for (let i = period - 1; i < candles.length; i++) {
     const avg =
@@ -10,6 +11,7 @@ export function calcSMA(candles, period) {
 }
 
 export function calcEMA(candles, period) {
+  if (!candles || candles.length < period) return [];
   const k = 2 / (period + 1);
   const out = [];
   let ema = candles.slice(0, period).reduce((s, c) => s + c.close, 0) / period;

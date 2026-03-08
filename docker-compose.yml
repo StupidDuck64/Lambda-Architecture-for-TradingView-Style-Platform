@@ -364,6 +364,7 @@ services:
     command: dagster-webserver -h 0.0.0.0 -p 3000 -w /app/orchestration/workspace.yaml
     environment:
       DAGSTER_HOME: /dagster-home
+      DAGSTER_PG_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/dagster
       SPARK_MASTER: spark://spark-master:7077
       KAFKA_BOOTSTRAP: kafka:9092
       INFLUX_URL: http://influxdb:8086
@@ -391,6 +392,7 @@ services:
     command: dagster-daemon run -w /app/orchestration/workspace.yaml
     environment:
       DAGSTER_HOME: /dagster-home
+      DAGSTER_PG_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/dagster
       SPARK_MASTER: spark://spark-master:7077
       KAFKA_BOOTSTRAP: kafka:9092
       INFLUX_URL: http://influxdb:8086

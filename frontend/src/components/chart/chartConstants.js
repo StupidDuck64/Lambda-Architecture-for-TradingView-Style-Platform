@@ -19,6 +19,54 @@ export const THEME = {
 
 export const TIMEFRAMES = ["1s", "1m", "5m", "15m", "1H", "4H", "1D", "1W"];
 
+/**
+ * Custom tick-mark formatter for lightweight-charts time scale.
+ * Accepts raw UTC-second timestamps and formats them in the browser's
+ * local timezone via Intl so the chart shows local time without having
+ * to shift timestamp values in the data itself.
+ *
+ * tickMarkType enum (lightweight-charts 5.x):
+ *   0 = Year, 1 = Month, 2 = DayOfMonth, 3 = Time, 4 = TimeWithSeconds
+ */
+export function localTickMarkFormatter(time, tickMarkType, locale) {
+  const d = new Date(time * 1000);
+  switch (tickMarkType) {
+    case 0:
+      return d.toLocaleDateString(locale, { year: "numeric" });
+    case 1:
+      return d.toLocaleDateString(locale, { month: "short", year: "numeric" });
+    case 2:
+      return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
+    case 3:
+      return d.toLocaleTimeString(locale, {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    case 4:
+      return d.toLocaleTimeString(locale, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+    default:
+      return d.toLocaleDateString(locale);
+  }
+}
+
+// Polling intervals (ms) for auto-refresh per timeframe
+export const REFRESH_INTERVALS = {
+  "1s": 2000,
+  "1m": 10000,
+  "5m": 30000,
+  "15m": 60000,
+  "1H": 60000,
+  "4H": 120000,
+  "1D": 300000,
+  "1W": 600000,
+};
+
 export const CHART_TABS = [
   "candlestick",
   "overview",

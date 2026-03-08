@@ -24,6 +24,8 @@ import {
   CHART_TABS,
   TAB_ICONS,
   DEFAULT_INDICATOR_SETTINGS,
+  REFRESH_INTERVALS,
+  localTickMarkFormatter,
 } from "./chart/chartConstants";
 import { calcSMA, calcEMA, calcRSI, calcMFI } from "./chart/indicatorUtils";
 import IndicatorPanel from "./chart/IndicatorPanel";
@@ -61,6 +63,7 @@ const CandlestickChart = ({
   const [fetchError, setFetchError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const [historicalRange, setHistoricalRange] = useState(null); // { startMs, endMs } or null
+  const [noData, setNoData] = useState(false);
 
   const handleSymbolChange = useCallback(
     (s) => {
@@ -86,6 +89,9 @@ const CandlestickChart = ({
         fontFamily: "'Inter','Segoe UI',sans-serif",
         fontSize: 12,
       },
+      localization: {
+        locale: navigator.language || "en-US",
+      },
       grid: {
         vertLines: { color: THEME.gridColor, style: LineStyle.Solid },
         horzLines: { color: THEME.gridColor, style: LineStyle.Solid },
@@ -105,6 +111,7 @@ const CandlestickChart = ({
         secondsVisible: false,
         barSpacing: 8,
         minBarSpacing: 3,
+        tickMarkFormatter: localTickMarkFormatter,
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true },
       handleScale: {
@@ -165,7 +172,7 @@ const CandlestickChart = ({
       const v = param.seriesData.get(vs);
       if (c) {
         const d = new Date(param.time * 1000);
-        const lbl = d.toLocaleString("en-US", {
+        const lbl = d.toLocaleString(undefined, {
           month: "short",
           day: "2-digit",
           hour: "2-digit",
@@ -196,6 +203,7 @@ const CandlestickChart = ({
     (data) => {
       if (!candleRef.current) return;
       setCandles(data);
+      setNoData(data.length === 0);
       candleRef.current.setData(data);
       const vs = volumeRef.current;
       if (vs)
@@ -219,20 +227,39 @@ const CandlestickChart = ({
     [indSettings],
   );
 
-  // Load data when symbol or timeframe changes (live mode)
+  // Load data when symbol or timeframe changes (live mode) + auto-refresh
   useEffect(() => {
     if (!candleRef.current || historicalRange) return;
+
+    // Update secondsVisible based on timeframe
+    if (chartRef.current) {
+      const showSeconds = timeframe === "1s" || timeframe === "1m";
+      chartRef.current
+        .timeScale()
+        .applyOptions({ secondsVisible: showSeconds });
+    }
+
+    const loadData = () => {
+      setFetchError(null);
+      fetchCandles(symbol, timeframe.toLowerCase(), 120)
+        .then((data) => {
+          applyDataToChart(data);
+          setIsLoading(false);
+        })
+        .catch(() => {
+          setIsLoading(false);
+          setFetchError("Failed to load candle data");
+        });
+    };
+
     setIsLoading(true);
-    setFetchError(null);
-    fetchCandles(symbol, timeframe.toLowerCase(), 120)
-      .then((data) => {
-        applyDataToChart(data);
-        setIsLoading(false);
-      })
-      .catch(() => {
-        setIsLoading(false);
-        setFetchError("Failed to load candle data");
-      });
+    setNoData(false);
+    loadData();
+
+    // Auto-refresh polling based on selected timeframe
+    const interval = REFRESH_INTERVALS[timeframe] || 60000;
+    const pollId = setInterval(loadData, interval);
+    return () => clearInterval(pollId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, timeframe, historicalRange, retryCount]);
 
@@ -318,7 +345,7 @@ const CandlestickChart = ({
     : null;
   const isUp = priceDiff >= 0;
 
-  // RSI / MFI computed data
+  // RSI / MFI computed data (shifted for local timezone)
   const rsiData = indSettings.rsi.visible
     ? calcRSI(candles, indSettings.rsi.period)
     : null;
@@ -496,6 +523,13 @@ const CandlestickChart = ({
                   Retry
                 </button>
               </div>
+            </div>
+          )}
+          {noData && !isLoading && !fetchError && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-40 z-10">
+              <p className="text-gray-400 text-sm">
+                No data available for {symbol} @ {timeframe}
+              </p>
             </div>
           )}
           {children}

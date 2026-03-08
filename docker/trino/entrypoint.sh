@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# ── Substitute env-var placeholders in Trino catalog properties ──────────────
+# â”€â”€ Substitute env-var placeholders in Trino catalog properties â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 CATALOG="/etc/trino/catalog/iceberg.properties"
 if [ -f "$CATALOG" ]; then
   sed -i \
