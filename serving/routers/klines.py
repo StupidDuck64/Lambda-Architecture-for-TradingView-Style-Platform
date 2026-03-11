@@ -224,14 +224,40 @@ async def get_klines(
                 candles[-1]["high"] = max(candles[-1]["high"], live_price)
                 candles[-1]["low"] = min(candles[-1]["low"], live_price)
             elif not candles or aligned_time > candles[-1]["openTime"]:
-                candles.append({
-                    "openTime": aligned_time,
-                    "open": live_price,
-                    "high": live_price,
-                    "low": live_price,
-                    "close": live_price,
-                    "volume": 0,
-                })
+                # Build in-progress candle from sub-candle data (same as ws.py)
+                # so REST and WS return consistent OHLCV for the live candle.
+                built = False
+                if interval != "1s":
+                    src = f"candle:1s:{symbol}" if interval == "1m" else f"candle:1m:{symbol}"
+                    raw_sub = await r.zrangebyscore(
+                        src, aligned_time, aligned_time + target_ms - 1,
+                    )
+                    if raw_sub:
+                        sub = [json.loads(c) for c in raw_sub]
+                        latest_sub_ts = max(int(c["t"]) for c in sub)
+                        progress = {
+                            "openTime": aligned_time,
+                            "open": sub[0]["o"],
+                            "high": max(c["h"] for c in sub),
+                            "low": min(c["l"] for c in sub),
+                            "close": sub[-1]["c"],
+                            "volume": round(sum(c["v"] for c in sub), 8),
+                        }
+                        if live_ts > latest_sub_ts:
+                            progress["close"] = live_price
+                            progress["high"] = max(progress["high"], live_price)
+                            progress["low"] = min(progress["low"], live_price)
+                        candles.append(progress)
+                        built = True
+                if not built:
+                    candles.append({
+                        "openTime": aligned_time,
+                        "open": live_price,
+                        "high": live_price,
+                        "low": live_price,
+                        "close": live_price,
+                        "volume": 0,
+                    })
         result = candles[-limit:]
     
     # Cache result in Redis (0.1 second TTL for ultra-low latency)

@@ -498,6 +498,8 @@ const CandlestickChart = ({
           for (const c of data) {
             const existIdx = prev.findIndex((p) => p.time === c.time);
             if (existIdx >= 0) {
+              // Skip poll updates for the live (latest) candle on >=1m — WS is authoritative
+              if (!is1s && existIdx === prev.length - 1) continue;
               const old = prev[existIdx];
               if (old.close !== c.close || old.high !== c.high || old.low !== c.low || old.volume !== c.volume) {
                 prev[existIdx] = c;
