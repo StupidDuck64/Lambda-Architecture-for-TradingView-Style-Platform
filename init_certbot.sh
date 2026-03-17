@@ -1,52 +1,77 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
-# init_certbot.sh — Obtain or renew a Let's Encrypt certificate via webroot
-# ─────────────────────────────────────────────────────────────────────────────
-# Usage:
-#   ./init_certbot.sh <your-domain> <your-email>
-#
-# Example:
-#   ./init_certbot.sh crypto.example.com admin@example.com
-#
-# Prerequisites:
-#   - certbot installed on the HOST  (sudo apt install certbot  OR  pip)
-#   - The nginx container must be running (docker compose up -d nginx)
-#   - Port 80 must be reachable from the internet
-# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap HTTPS automation variables and start automation services.
+# Usage: ./init_certbot.sh <domain> <email>
 set -euo pipefail
 
 DOMAIN="${1:?Usage: $0 <domain> <email>}"
 EMAIL="${2:?Usage: $0 <domain> <email>}"
+ENV_FILE=".env"
 
-COMPOSE_PROJECT="cryptoprice"
-WEBROOT_VOLUME="${COMPOSE_PROJECT}_certbot-webroot"
-LETSENCRYPT_VOLUME="${COMPOSE_PROJECT}_letsencrypt"
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker is required"
+  exit 1
+fi
 
-# Resolve volume mount points on the host
-webroot_mount=$(docker volume inspect "$WEBROOT_VOLUME" --format '{{ .Mountpoint }}')
-letsencrypt_mount=$(docker volume inspect "$LETSENCRYPT_VOLUME" --format '{{ .Mountpoint }}')
+if ! docker compose version >/dev/null 2>&1; then
+  echo "docker compose is required"
+  exit 1
+fi
 
-echo "==> Requesting certificate for $DOMAIN ..."
-echo "    Webroot:      $webroot_mount"
-echo "    Letsencrypt:  $letsencrypt_mount"
+if [ ! -f "$ENV_FILE" ]; then
+  touch "$ENV_FILE"
+fi
 
-sudo certbot certonly \
-    --webroot \
-    --webroot-path "$webroot_mount" \
-    --config-dir "$letsencrypt_mount" \
-    --work-dir /tmp/certbot-work \
-    --logs-dir /tmp/certbot-logs \
-    --email "$EMAIL" \
-    --agree-tos \
-    --no-eff-email \
-    -d "$DOMAIN"
+upsert_env() {
+  key="$1"
+  value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    printf "%s=%s\n" "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
+# If the domain is a duckdns host, infer subdomain for duckdns-auto.
+DUCK_SUBDOMAIN=""
+if [[ "$DOMAIN" =~ ^([a-zA-Z0-9-]+)\.duckdns\.org$ ]]; then
+  DUCK_SUBDOMAIN="${BASH_REMATCH[1]}"
+fi
+
+upsert_env "CERTBOT_DOMAIN" "$DOMAIN"
+upsert_env "CERTBOT_EMAIL" "$EMAIL"
+
+if [ -n "$DUCK_SUBDOMAIN" ] && ! grep -q '^DUCKDNS_SUBDOMAINS=' "$ENV_FILE"; then
+  upsert_env "DUCKDNS_SUBDOMAINS" "$DUCK_SUBDOMAIN"
+fi
+
+# Ensure automation toggles have sane defaults.
+if ! grep -q '^CERTBOT_RENEW_INTERVAL_SECONDS=' "$ENV_FILE"; then
+  upsert_env "CERTBOT_RENEW_INTERVAL_SECONDS" "43200"
+fi
+if ! grep -q '^NGINX_AUTO_RELOAD_ENABLE=' "$ENV_FILE"; then
+  upsert_env "NGINX_AUTO_RELOAD_ENABLE" "1"
+fi
+if ! grep -q '^NGINX_RELOAD_INTERVAL_SECONDS=' "$ENV_FILE"; then
+  upsert_env "NGINX_RELOAD_INTERVAL_SECONDS" "21600"
+fi
+if ! grep -q '^DUCKDNS_UPDATE_INTERVAL_SECONDS=' "$ENV_FILE"; then
+  upsert_env "DUCKDNS_UPDATE_INTERVAL_SECONDS" "300"
+fi
+
+echo "Starting HTTPS automation services..."
+docker compose up -d nginx certbot-auto duckdns-auto
 
 echo ""
-echo "==> Certificate obtained! Reloading nginx inside the container..."
-docker exec nginx nginx -s reload
+echo "Current service status:"
+docker compose ps nginx certbot-auto duckdns-auto
 
 echo ""
-echo "==> Done. Your site should now be live at https://$DOMAIN"
+echo "Recent certbot logs:"
+docker logs --tail 20 certbot-auto || true
+
 echo ""
-echo "To auto-renew, add a cron job (sudo crontab -e):"
-echo "  0 3 * * * certbot renew --webroot --webroot-path $webroot_mount --config-dir $letsencrypt_mount --work-dir /tmp/certbot-work --logs-dir /tmp/certbot-logs --deploy-hook 'docker exec nginx nginx -s reload' >> /var/log/certbot-renew.log 2>&1"
+echo "Recent duckdns logs:"
+docker logs --tail 20 duckdns-auto || true
+
+echo ""
+echo "Bootstrap complete for https://${DOMAIN}"

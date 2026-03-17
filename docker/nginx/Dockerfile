@@ -18,6 +18,9 @@ RUN npm run build
 # Stage 2: Serve with Nginx
 FROM nginx:1.27-alpine
 
+# Required by entrypoint.sh for temporary self-signed certificate generation
+RUN apk add --no-cache openssl
+
 # Remove default config
 RUN rm /etc/nginx/conf.d/default.conf
 
@@ -34,9 +37,11 @@ RUN mkdir -p /var/www/certbot
 COPY docker/nginx/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Copy periodic nginx reload helper so renewed certs are picked up automatically
+COPY scripts/nginx_auto_reload.sh /usr/local/bin/nginx_auto_reload.sh
+RUN chmod +x /usr/local/bin/nginx_auto_reload.sh
+
 EXPOSE 80 443
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["nginx", "-g", "daemon off;"]
-
 CMD ["nginx", "-g", "daemon off;"]

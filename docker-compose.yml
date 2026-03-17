@@ -501,6 +501,8 @@ services:
       - "443:443"
     environment:
       - CERTBOT_DOMAIN=${CERTBOT_DOMAIN:-localhost}
+      - NGINX_AUTO_RELOAD_ENABLE=${NGINX_AUTO_RELOAD_ENABLE:-1}
+      - NGINX_RELOAD_INTERVAL_SECONDS=${NGINX_RELOAD_INTERVAL_SECONDS:-21600}
     volumes:
       - letsencrypt:/etc/letsencrypt
       - certbot-webroot:/var/www/certbot
@@ -511,11 +513,44 @@ services:
       fastapi:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --spider --no-check-certificate https://127.0.0.1/ || exit 1",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  certbot-auto:
+    image: certbot/certbot:latest
+    container_name: certbot-auto
+    restart: unless-stopped
+    environment:
+      - CERTBOT_DOMAIN=${CERTBOT_DOMAIN:-}
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL:-}
+      - CERTBOT_RENEW_INTERVAL_SECONDS=${CERTBOT_RENEW_INTERVAL_SECONDS:-43200}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+      - ./scripts:/scripts:ro
+    entrypoint: ["sh", "/scripts/certbot_auto.sh"]
+    depends_on:
+      nginx:
+        condition: service_started
+
+  duckdns-auto:
+    image: curlimages/curl:8.7.1
+    container_name: duckdns-auto
+    restart: unless-stopped
+    environment:
+      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN:-}
+      - DUCKDNS_SUBDOMAINS=${DUCKDNS_SUBDOMAINS:-}
+      - DUCKDNS_UPDATE_INTERVAL_SECONDS=${DUCKDNS_UPDATE_INTERVAL_SECONDS:-300}
+    volumes:
+      - ./scripts:/scripts:ro
+    command: ["sh", "/scripts/duckdns_auto.sh"]
 
   # ══════════════════════════════════════════════════════════════════════════════
   # PRODUCER (long-running stream)

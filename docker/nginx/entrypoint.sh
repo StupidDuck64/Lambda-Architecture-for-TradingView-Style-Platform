@@ -19,4 +19,8 @@ if [ ! -f "$CERT_DIR/fullchain.pem" ]; then
     echo "==> Temporary self-signed cert created. Run certbot to obtain a real certificate."
 fi
 
+if [ "${NGINX_AUTO_RELOAD_ENABLE:-1}" = "1" ]; then
+    /usr/local/bin/nginx_auto_reload.sh &
+fi
+
 exec "$@"
