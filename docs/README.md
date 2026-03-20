@@ -16,7 +16,7 @@ Dự án streaming giá crypto real-time từ Binance WebSocket, xử lý bằng
 
 ```
 Dagster (scheduled):
-  02:00 AM ── backfill_historical.py ──→ InfluxDB + Iceberg
+  Manual/On-demand ── backfill_historical.py ──→ InfluxDB + Iceberg
   03:00 AM ── iceberg_maintenance.py ──→ Compact/Expire Iceberg
   04:00 AM ── aggregate_candles.py   ──→ 1m→1h InfluxDB + Iceberg
 ```
@@ -35,7 +35,7 @@ Dagster (scheduled):
 cp .env.example .env
 # Mở .env và thay đổi các giá trị mật khẩu/token
 
-# 1. Build & start toàn bộ 16 services (bao gồm FastAPI + Nginx)
+# 1. Build & start toàn bộ 21 services (bao gồm FastAPI + Nginx + certbot/duckdns)
 docker compose up -d --build
 
 # 2. Submit Flink streaming job (6 writer: ticker/kline/indicator/depth → KeyDB + InfluxDB)
@@ -82,7 +82,7 @@ docker exec spark-master /opt/spark/bin/spark-submit \
 
 ```
 cryptoprice_local/
-├── docker-compose.yml              # 16 services
+├── docker-compose.yml              # 21 services
 ├── .env                            # Secrets (gitignored)
 ├── .env.example                    # Template — copy sang .env rồi sửa
 ├── spark-defaults.conf             # Spark config
@@ -90,24 +90,23 @@ cryptoprice_local/
 │   ├── producer_binance.py         # [Auto] Binance WS → Kafka
 │   ├── ingest_flink_crypto.py      # [Manual] Flink: Kafka → KeyDB + InfluxDB
 │   ├── ingest_crypto.py            # [Manual] Spark Streaming: Kafka → Iceberg
-│   ├── backfill_historical.py      # [Dagster 02:00] Backfill InfluxDB + Iceberg
+│   ├── backfill_historical.py      # [Manual] Backfill InfluxDB + Iceberg
 │   ├── aggregate_candles.py        # [Dagster 04:00] Gộp nến 1m → 1h
 │   ├── iceberg_maintenance.py      # [Dagster CN 03:00] Compact/expire Iceberg
-│   ├── backfill_influx.py          # (legacy) Đã merge vào backfill_historical
-│   └── ingest_historical_iceberg.py# (legacy) Đã merge vào backfill_historical
+│   └── candle_query_helper.py       # Helper truy vấn/chuẩn hoá dữ liệu nến
 ├── serving/                        # FastAPI serving layer
 │   ├── main.py                     # App + lifespan + CORS + health check
 │   ├── config.py                   # Biến môi trường (Redis, InfluxDB, Trino)
 │   ├── connections.py              # Singleton connections (KeyDB, InfluxDB, Trino)
 │   └── routers/
 │       ├── klines.py               # GET /api/klines — nến OHLCV (KeyDB + InfluxDB)
-│       ├── historical.py           # GET /api/historical — nến lịch sử (Trino/Iceberg)
-│       ├── ticker.py               # GET /api/ticker — giá real-time
-│       ├── orderbook.py            # GET /api/orderbook — sổ lệnh
-│       ├── trades.py               # GET /api/trades — giao dịch gần nhất
+│       ├── historical.py           # GET /api/klines/historical — nến lịch sử (Trino/Iceberg)
+│       ├── ticker.py               # GET /api/ticker + /api/ticker/{symbol}
+│       ├── orderbook.py            # GET /api/orderbook/{symbol}
+│       ├── trades.py               # GET /api/trades/{symbol}
 │       ├── symbols.py              # GET /api/symbols — danh sách coin
-│       ├── indicators.py           # GET /api/indicators — SMA/EMA
-│       └── ws.py                   # WS /api/ws/{symbol} — streaming real-time
+│       ├── indicators.py           # GET /api/indicators/{symbol} — SMA/EMA
+│       └── ws.py                   # WS /api/stream?symbol=&interval= — streaming real-time
 ├── frontend/                       # React SPA (TradingView-style dashboard)
 │   ├── src/
 │   │   ├── App.js                  # Layout chính + fetch symbols/tickers
@@ -116,7 +115,7 @@ cryptoprice_local/
 │   │   └── hooks/useCandlestickData.js    # Chart data hook
 │   └── package.json
 ├── orchestration/
-│   ├── assets.py                   # Dagster: 3 assets + 3 schedules
+│   ├── assets.py                   # Dagster: 3 assets + 2 schedules
 │   └── workspace.yaml
 └── docker/
     ├── flink/                      # Dockerfile + flink-conf.yaml
@@ -222,13 +221,13 @@ Cung cấp REST API + WebSocket cho frontend. Kết nối 3 data source tuỳ th
 | Router          | Endpoint              | Data Source                  | Chức năng                                    |
 | :-------------- | :-------------------- | :--------------------------- | :------------------------------------------- |
 | `klines.py`     | `GET /api/klines`     | KeyDB (`1s`) → InfluxDB (`1m+`) → Trino/Iceberg (deep history) | Nến OHLCV + aggregate server-side |
-| `historical.py` | `GET /api/historical` | Trino → Iceberg              | Nến lịch sử (chọn khoảng ngày, tối đa 1 năm) |
-| `ticker.py`     | `GET /api/ticker`     | KeyDB                        | Giá real-time, hỗ trợ batch multi-symbol     |
-| `orderbook.py`  | `GET /api/orderbook`  | KeyDB                        | Sổ lệnh 20 levels bid/ask                    |
-| `trades.py`     | `GET /api/trades`     | KeyDB                        | 50 giao dịch gần nhất                        |
+| `historical.py` | `GET /api/klines/historical` | InfluxDB + Trino → Iceberg | Nến lịch sử theo khoảng ngày (tối đa 1 năm) |
+| `ticker.py`     | `GET /api/ticker`, `GET /api/ticker/{symbol}` | KeyDB | Giá real-time (all symbols hoặc theo symbol) |
+| `orderbook.py`  | `GET /api/orderbook/{symbol}` | KeyDB (+ fallback Binance REST) | Sổ lệnh 20 levels bid/ask |
+| `trades.py`     | `GET /api/trades/{symbol}` | KeyDB                        | Tick history gần nhất                        |
 | `symbols.py`    | `GET /api/symbols`    | KeyDB scan                   | Danh sách coin đang có dữ liệu               |
-| `indicators.py` | `GET /api/indicators` | KeyDB                        | SMA20, SMA50, EMA12, EMA26                   |
-| `ws.py`         | `WS /api/ws/{symbol}` | KeyDB                        | Streaming nến real-time (500ms interval)     |
+| `indicators.py` | `GET /api/indicators/{symbol}` | KeyDB                  | SMA20, SMA50, EMA12, EMA26                   |
+| `ws.py`         | `WS /api/stream?symbol=&interval=` | KeyDB              | Streaming nến real-time (500ms interval)     |
 
 Health check: `GET /api/health` — ping KeyDB, InfluxDB, Trino.
 
@@ -236,7 +235,7 @@ Health check: `GET /api/health` — ping KeyDB, InfluxDB, Trino.
 
 Giao diện TradingView-style, build bằng React 18 + lightweight-charts. Nginx phục vụ SPA tại port 80, proxy `/api/` tới FastAPI.
 
-- **CandlestickChart**: Biểu đồ nến OHLCV real-time + lịch sử, hỗ trợ 6 timeframe (1s → 1D)
+- **CandlestickChart**: Biểu đồ nến OHLCV real-time + lịch sử, hỗ trợ 8 timeframe (1s, 1m, 5m, 15m, 1H, 4H, 1D, 1W)
 - **MarketSelector**: Tìm kiếm/chọn symbol, hiển thị giá + % thay đổi
 - **OrderBook**: Sổ lệnh real-time với thanh depth
 - **RecentTrades**: Giao dịch gần nhất, màu xanh/đỏ theo phía mua/bán
@@ -250,12 +249,9 @@ Multi-stage Dockerfile: build React app (Node 20) → copy vào nginx:1.25-alpin
 - `/api/` → proxy tới FastAPI (hỗ trợ WebSocket upgrade)
 - Gzip enabled, static cache 1 năm
 
-### Legacy files (có thể xoá)
+### Legacy files
 
-| File                           | Lý do                                                          |
-| :----------------------------- | :------------------------------------------------------------- |
-| `backfill_influx.py`           | Chức năng đã merge vào `backfill_historical.py --mode influx`  |
-| `ingest_historical_iceberg.py` | Chức năng đã merge vào `backfill_historical.py --mode iceberg` |
+Các file legacy đã được loại bỏ khỏi `src/` trong hiện trạng repository.
 
 ## Dữ liệu lưu ở đâu?
 
@@ -313,7 +309,8 @@ docker exec kafka /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server kafka
 # Serving layer
 curl http://localhost:8080/api/health
 curl http://localhost:8080/api/symbols
-curl http://localhost:8080/api/ticker?symbol=BTCUSDT
+curl http://localhost:8080/api/ticker/BTCUSDT
 curl "http://localhost:8080/api/klines?symbol=BTCUSDT&interval=1m&limit=100"
-curl "http://localhost:8080/api/orderbook?symbol=BTCUSDT"
+curl http://localhost:8080/api/orderbook/BTCUSDT
+curl "http://localhost:8080/api/klines/historical?symbol=BTCUSDT&interval=1h&startTime=1704067200000&endTime=1706745600000&limit=500"
 ```

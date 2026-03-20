@@ -2,6 +2,13 @@
 
 > **Mục tiêu tài liệu:** Giải thích sâu toàn bộ hệ thống từ luồng dữ liệu, kiến trúc, từng service, đến logic xử lý trong code — để bạn hiểu được "cái gì làm gì và tại sao".
 
+> **Bổ sung cập nhật hiện trạng (2026-03-20):**
+> - Docker Compose hiện chạy theo cấu hình **21 services**.
+> - Endpoint historical chính thức: `GET /api/klines/historical`.
+> - WebSocket stream: `WS /api/stream?symbol=&interval=`.
+> - Dagster chỉ giữ 2 schedule: `daily_candle_aggregation` (04:00 hằng ngày) và `weekly_iceberg_maintenance` (03:00 Chủ Nhật). `backfill_historical` là asset chạy thủ công.
+> - Frontend chart mặc định mở theo số nến cuối: timeframe <= 1h dùng 50 nến, timeframe > 1h dùng 20 nến; nếu thiếu dữ liệu sẽ tự preload thêm nến lịch sử (bao gồm historical view).
+
 ---
 
 ## Mục lục
@@ -27,7 +34,7 @@
 
 ## 1. Tổng quan dự án
 
-**Lambda Architecture for TradingView-Style Platform** là một hệ thống real-time xử lý và hiển thị giá tiền điện tử, hoạt động hoàn toàn trên Docker (18 container). Hệ thống theo dõi ~400 cặp USDT Spot từ Binance, xử lý dữ liệu theo kiến trúc Lambda gồm 3 lớp: **Speed layer** (Flink), **Batch layer** (Spark), **Serving layer** (FastAPI + KeyDB), và hiển thị qua dashboard TradingView-style (React + lightweight-charts).
+**Lambda Architecture for TradingView-Style Platform** là một hệ thống real-time xử lý và hiển thị giá tiền điện tử, hoạt động hoàn toàn trên Docker (21 services theo `docker-compose.yml` hiện tại). Hệ thống theo dõi ~400 cặp USDT Spot từ Binance, xử lý dữ liệu theo kiến trúc Lambda gồm 3 lớp: **Speed layer** (Flink), **Batch layer** (Spark), **Serving layer** (FastAPI + KeyDB), và hiển thị qua dashboard TradingView-style (React + lightweight-charts).
 
 **Tech stack:**
 
@@ -161,17 +168,20 @@ Binance WS (@depth20@100ms mỗi symbol)
 ### 3.2 Batch path (lịch sử)
 
 ```
-Dagster schedule (daily 02:00 UTC):
+Manual run (không schedule):
   spark-submit backfill_historical.py --mode all --iceberg-mode incremental
     - Lấy timestamp mới nhất trong Iceberg historical_hourly
     - Binance REST API: kéo 1h klines từ đó đến nay → Iceberg
     - Detect gap InfluxDB 7 ngày → fill từ Binance REST → InfluxDB
 
-Dagster schedule (daily 03:00 UTC):
+Dagster schedule (daily 04:00 UTC):
   spark-submit aggregate_candles.py
     - Đọc InfluxDB 1m → aggregate → 1h → ghi lại InfluxDB
     - Đọc Iceberg historical_hourly → aggregate → coin_klines_hourly
     - Xóa InfluxDB 1m data cũ hơn RETENTION_1M_DAYS ngày (mặc định 90)
+
+Dagster schedule (weekly Sunday 03:00 UTC):
+  spark-submit iceberg_maintenance.py
 ```
 
 ### 3.3 API serving path
@@ -444,9 +454,9 @@ State lưu trong PostgreSQL `dagster` database.
 
 | Asset | Mô tả | Schedule |
 |---|---|---|
-| `backfill_historical` | `spark-submit backfill_historical.py --mode all --iceberg-mode incremental` | Daily 02:00 UTC |
-| `aggregate_candles` | `spark-submit aggregate_candles.py` — 1m→1h + retention cleanup | Daily 03:00 UTC |
-| `iceberg_maintenance` | `spark-submit iceberg_maintenance.py` — compact + expire | Weekly Sunday 04:00 UTC |
+| `backfill_historical` | `spark-submit backfill_historical.py --mode all --iceberg-mode incremental` | Thủ công (không có schedule) |
+| `aggregate_candles` | `spark-submit aggregate_candles.py --mode all` — 1m→1h + retention cleanup | Daily 04:00 UTC |
+| `iceberg_table_maintenance` | `spark-submit iceberg_maintenance.py` — compact + expire | Weekly Sunday 03:00 UTC |
 
 Dagster Daemon poll schedule mỗi 30s, tạo Run khi đến schedule, submit Spark job qua subprocess, stream log vào Dagster UI.
 
@@ -575,6 +585,11 @@ from(bucket: "crypto")
 
 **Endpoint:** `WS /api/stream?symbol=&interval=`
 
+Lưu ý hành vi hiện tại của `ws.py`:
+- `1s`: chỉ phát candle 1s mới nhất từ `candle:1s:{symbol}`, **không** override/synthesize bằng ticker.
+- `1m`: aggregate từ `candle:1s` theo phút, không override bằng ticker.
+- `5m+`: có thể merge với ticker khi ticker mới hơn và vẫn nằm trong window đang mở.
+
 **`_build_candle(symbol, interval)`:**
 
 ```python
@@ -629,7 +644,11 @@ Nginx serve React SPA + proxy API:
 ```js
 export const TIMEFRAMES = ["1s", "1m", "5m", "15m", "1H", "4H", "1D", "1W"]
 ```
-
+  a. fetchCandles(symbol, tf, limit) → preloadInitialCandles() khi thiếu nến ban đầu
+    - timeframe <= 1h: viewport mặc định 50 nến mới nhất
+    - timeframe > 1h: viewport mặc định 20 nến mới nhất
+    - áp dụng cho cả live mode và historical mode
+    → applyDataToChart()
 Lưu ý uppercase H/D/W — tất cả API calls dùng `.toLowerCase()` trước khi gửi backend.
 
 ### 8.1 `marketDataService.js`

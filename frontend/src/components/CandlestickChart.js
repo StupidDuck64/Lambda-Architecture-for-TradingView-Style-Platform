@@ -13,6 +13,7 @@ import {
   fetchCandles,
   fetchHistoricalCandles,
   subscribeCandle,
+  TIMEFRAMES as SERVICE_TIMEFRAMES,
 } from "../services/marketDataService";
 import MarketSelector from "./MarketSelector";
 import DateRangePicker from "./DateRangePicker";
@@ -74,6 +75,78 @@ const CandlestickChart = ({
   const earliestTimestampRef = useRef(null);
   const noMoreDataRef = useRef(false);
   const scrollCooldownRef = useRef(0);
+
+  const getTimeframeSeconds = useCallback((tf) => {
+    return SERVICE_TIMEFRAMES[(tf || "").toLowerCase()]?.seconds || 3600;
+  }, []);
+
+  const getInitialVisibleBars = useCallback(
+    (tf) => {
+      const seconds = getTimeframeSeconds(tf);
+      return seconds > 3600 ? 20 : 50;
+    },
+    [getTimeframeSeconds],
+  );
+
+  const setInitialVisibleRange = useCallback(
+    (data, tf) => {
+      if (!chartRef.current || !Array.isArray(data) || data.length === 0) return;
+      const bars = getInitialVisibleBars(tf);
+      const to = data.length - 1 + 0.5;
+      const from = Math.max(0, data.length - bars) - 0.5;
+      chartRef.current.timeScale().setVisibleLogicalRange({ from, to });
+    },
+    [getInitialVisibleBars],
+  );
+
+  const preloadInitialCandles = useCallback(
+    async ({ data, requestSymbol, requestInterval, isHistoricalMode = false }) => {
+      if (!Array.isArray(data) || data.length === 0) return data;
+
+      const requiredBars = getInitialVisibleBars(requestInterval);
+      if (data.length >= requiredBars) return data;
+
+      const earliestTime = data[0].time;
+      const missingBars = requiredBars - data.length;
+      const fetchLimit = Math.min(Math.max(missingBars + 20, requiredBars), 500);
+      let olderData = [];
+
+      try {
+        if (isHistoricalMode) {
+          const seconds = getTimeframeSeconds(requestInterval);
+          const backfillEndMs = earliestTime * 1000;
+          const backfillStartMs = Math.max(
+            0,
+            backfillEndMs - seconds * 1000 * fetchLimit,
+          );
+          olderData = await fetchHistoricalCandles(
+            requestSymbol,
+            backfillStartMs,
+            backfillEndMs,
+            fetchLimit,
+            requestInterval,
+          );
+        } else {
+          olderData = await fetchCandles(
+            requestSymbol,
+            requestInterval,
+            fetchLimit,
+            earliestTime,
+          );
+        }
+      } catch {
+        return data;
+      }
+
+      if (!Array.isArray(olderData) || olderData.length === 0) return data;
+
+      const dedupedOlder = olderData.filter((c) => c.time < earliestTime);
+      if (dedupedOlder.length === 0) return data;
+
+      return [...dedupedOlder, ...data].sort((a, b) => a.time - b.time);
+    },
+    [getInitialVisibleBars, getTimeframeSeconds],
+  );
 
   // Keep latest symbol/timeframe in refs so async scroll-load results can be
   // ignored when the user changes context mid-request.
@@ -353,7 +426,7 @@ const CandlestickChart = ({
 
   // Helper: push OHLCV data into chart series + indicators
   const applyDataToChart = useCallback(
-    (data) => {
+    (data, tfForViewport = timeframe) => {
       if (!candleRef.current) return;
       setCandles(data);
       candlesRef.current = data;
@@ -384,11 +457,11 @@ const CandlestickChart = ({
         rsiSeriesRef.current.setData(calcRSI(data, indSettings.rsi.period));
       if (mfiSeriesRef.current)
         mfiSeriesRef.current.setData(calcMFI(data, indSettings.mfi.period));
-      if (chartRef.current) chartRef.current.timeScale().fitContent();
+      setInitialVisibleRange(data, tfForViewport);
       if (data.length > 0)
         setTooltip({ ...data[data.length - 1], timeLabel: "" });
     },
-    [indSettings, onCandlesChange],
+    [indSettings, onCandlesChange, setInitialVisibleRange, timeframe],
   );
 
   // Load data when symbol or timeframe changes (live mode) + auto-refresh
@@ -409,19 +482,29 @@ const CandlestickChart = ({
     const maxBars = is1s ? 120 : 10000;
 
     // Full load — fetches candles, rebuilds all series + indicators
-    const loadData = () => {
+    const loadData = async () => {
       setFetchError(null);
-      return fetchCandles(symbol, timeframe.toLowerCase(), limit)
-        .then((data) => {
-          if (cancelled) return;
-          applyDataToChart(data);
-          setIsLoading(false);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setIsLoading(false);
-          setFetchError("Failed to load candle data");
+      try {
+        const requestSymbol = symbol;
+        const requestInterval = timeframe.toLowerCase();
+        let data = await fetchCandles(requestSymbol, requestInterval, limit);
+        if (cancelled) return;
+
+        data = await preloadInitialCandles({
+          data,
+          requestSymbol,
+          requestInterval,
+          isHistoricalMode: false,
         });
+        if (cancelled) return;
+
+        applyDataToChart(data, requestInterval);
+        setIsLoading(false);
+      } catch {
+        if (cancelled) return;
+        setIsLoading(false);
+        setFetchError("Failed to load candle data");
+      }
     };
 
     setIsLoading(true);
@@ -570,7 +653,14 @@ const CandlestickChart = ({
       if (unsub) unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, timeframe, historicalRange, retryCount]);
+  }, [
+    symbol,
+    timeframe,
+    historicalRange,
+    retryCount,
+    applyDataToChart,
+    preloadInitialCandles,
+  ]);
 
   // Load historical data from Iceberg when date range is set
   useEffect(() => {
@@ -579,33 +669,51 @@ const CandlestickChart = ({
     setIsLoading(true);
     setFetchError(null);
     const interval = timeframe.toLowerCase();
-    fetchHistoricalCandles(
-      symbol,
-      historicalRange.startMs,
-      historicalRange.endMs,
-      2000,
-      interval,
-    )
-      .then((data) => {
+    (async () => {
+      try {
+        const requestSymbol = symbol;
+        const requestInterval = interval;
+        let data = await fetchHistoricalCandles(
+          requestSymbol,
+          historicalRange.startMs,
+          historicalRange.endMs,
+          2000,
+          requestInterval,
+        );
         if (cancelled) return;
 
-        applyDataToChart(data);
+        data = await preloadInitialCandles({
+          data,
+          requestSymbol,
+          requestInterval,
+          isHistoricalMode: true,
+        });
+        if (cancelled) return;
+
+        applyDataToChart(data, requestInterval);
         setIsLoading(false);
         if (data.length === 0) {
           setFetchError("No historical data for this range");
         }
-      })
-      .catch(() => {
+      } catch {
         if (cancelled) return;
         setIsLoading(false);
         setFetchError("Failed to load historical data");
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, historicalRange, timeframe, retryCount]);
+  }, [
+    symbol,
+    historicalRange,
+    timeframe,
+    retryCount,
+    applyDataToChart,
+    preloadInitialCandles,
+  ]);
 
   // Re-layout chart when chart tab becomes visible again
   useEffect(() => {

@@ -1,16 +1,21 @@
 # CryptoPrice — System Architecture & Feature Documentation
 
-> **Last updated:** 2026-03-11  
+> **Last updated:** 2026-03-20  
 > **Author:** Auto-generated from source code analysis  
 > **Version:** 1.0
 
+> **Bổ sung cập nhật hiện trạng (2026-03-20):**
+> - `docker-compose.yml` hiện định nghĩa **21 services**.
+> - Endpoint historical chuẩn là `GET /api/klines/historical`.
+> - Streaming websocket dùng `WS /api/stream?symbol=&interval=`.
+> - Dagster hiện có 2 schedule: `daily_candle_aggregation` (04:00 hằng ngày) và `weekly_iceberg_maintenance` (03:00 Chủ Nhật). Asset `backfill_historical` chạy thủ công.
 ---
 
 ## Mục lục
 
 1. [Tổng quan kiến trúc](#1-tổng-quan-kiến-trúc)
 2. [Sơ đồ data flow](#2-sơ-đồ-data-flow)
-3. [Docker Containers (18 services)](#3-docker-containers-18-services)
+3. [Docker Containers (21 services)](#3-docker-containers-21-services)
 4. [Data Layer — Ingestion](#4-data-layer--ingestion)
    - 4.1 [Producer (Binance WebSocket → Kafka)](#41-producer-binance-websocket--kafka)
    - 4.2 [Kafka](#42-kafka)
@@ -105,7 +110,7 @@ Binance WS ─► Producer ─► Kafka ─► Flink ─┬─► KeyDB (cache) 
 
 ---
 
-## 3. Docker Containers (18 services)
+## 3. Docker Containers (21 services)
 
 | # | Container | Image | Port | Vai trò |
 |---|-----------|-------|------|---------|
@@ -124,9 +129,12 @@ Binance WS ─► Producer ─► Kafka ─► Flink ─┬─► KeyDB (cache) 
 | 13 | `dagster-webserver` | cryptoprice/dagster | 3000 | Orchestration UI |
 | 14 | `dagster-daemon` | cryptoprice/dagster | — | Schedule executor |
 | 15 | `fastapi` | custom build | 8080 | REST + WebSocket API |
-| 16 | `nginx` | custom build | 80 | Reverse proxy + SPA hosting |
+| 16 | `nginx` | custom build | 80, 443 | Reverse proxy + SPA hosting |
 | 17 | `producer` | custom build | — | Binance WS → Kafka |
 | 18 | `influx-backfill` | custom build | — | One-shot: fill InfluxDB gaps |
+| 19 | `auto-submit-jobs` | custom build | — | Submit tự động Flink/Spark jobs sau khi cluster sẵn sàng |
+| 20 | `certbot-auto` | certbot/certbot:latest | — | Tự động renew TLS cert theo chu kỳ |
+| 21 | `duckdns-auto` | curlimages/curl:8.7.1 | — | Tự động cập nhật DuckDNS |
 
 **Network:** Tất cả containers cùng network `crypto-net` (bridge driver).
 
@@ -532,14 +540,12 @@ Endpoint `/api/klines` có logic routing phức tạp:
 
 ```
 1. Check Redis cache (100ms TTL) → return nếu có (skip cho endTime queries)
-2. PRIORITY 1: KeyDB sorted sets
-   - interval=1s → candle:1s:{symbol}
-   - interval=1m+ → candle:1m:{symbol}
-   - Deduplicate by timestamp
-3. PRIORITY 2: InfluxDB (nếu KeyDB không đủ data)
-   - Query base interval: 1s→1s, 1m/5m/15m→1m, 1h+→1h
-   - Fallback: nếu requesting >=1h mà không có aggregated 1h → query 1m và aggregate server-side
-4. Merge KeyDB + InfluxDB (avoid duplicates)
+2. PRIORITY 1: KeyDB sorted sets (real-time range ngắn)
+  - interval=1s → candle:1s:{symbol}
+3. PRIORITY 2: InfluxDB 1m + Iceberg/Trino 1m (deep history)
+  - interval=1m+ dùng 1m base candles, sau đó aggregate server-side lên 5m/15m/1h/4h/1d/1w
+  - endTime scroll-left sẽ backfill theo trang, ưu tiên Influx rồi fallback Trino
+4. Merge nguồn dữ liệu theo openTime (dedup)
 5. Re-aggregate nếu cần (1m→5m, 1m→15m, 1h→4h, etc.)
 6. Merge live ticker price vào candle cuối cùng (không cho endTime queries)
 7. Cache result 100ms
@@ -564,7 +570,7 @@ Endpoint `/api/klines` có logic routing phức tạp:
 
 **Đặc biệt cho 1s interval:**
 - Đọc `candle:1s:{symbol}` (latest entry)
-- Nếu ticker mới hơn (second khác) → synthesize 1s candle từ ticker price
+- Không synthesize/override từ ticker để giữ OHLC 1s bám sát luồng kline exchange
 
 ### 8.4 Candle Aggregation Logic
 
